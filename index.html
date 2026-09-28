@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* custom scrollbar for dark modern feel */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111827; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #374151; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5563; 
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen font-sans antialiased p-4 md:p-8">
+    <main class="max-w-4xl mx-auto space-y-8">
+        
+        <!-- header section -->
+        <header class="text-center space-y-2">
+            <h1 class="text-3xl md:text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-500">
+                Calculator
+            </h1>
+            <p class="text-gray-400 text-sm"></p>
+        </header>
+
+        <!-- input configuration card -->
+        <section class="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                
+                <div class="space-y-2">
+                    <label for="prestige" class="block text-sm font-medium text-gray-300">Prestige</label>
+                    <input type="number" id="prestige" value="1" min="0" 
+                           class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all placeholder-gray-500" 
+                           placeholder="enter prestige">
+                </div>
+
+                <div class="space-y-2">
+                    <label for="rank" class="block text-sm font-medium text-gray-300">Rank</label>
+                    <input type="number" id="rank" value="10" min="1" 
+                           class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all placeholder-gray-500" 
+                           placeholder="enter rank">
+                </div>
+
+                <div class="space-y-2">
+                    <label for="incomeBonus" class="block text-sm font-medium text-gray-300">Income Bonus</label>
+                    <input type="number" id="incomeBonus" value="1.0" min="0" step="0.1" 
+                           class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all placeholder-gray-500" 
+                           placeholder="multiplier (e.g. 1.5)">
+                </div>
+
+            </div>
+            
+            <button onclick="calculate()" 
+                    class="w-full bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-cyan-500/25 transition-all duration-200 uppercase tracking-wider text-sm">
+                Calculate
+            </button>
+        </section>
+
+        <!-- results section -->
+        <section class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden hidden" id="resultsSection">
+            <div class="overflow-x-auto max-h-[600px]">
+                <table class="w-full text-left border-collapse">
+                    <thead class="sticky top-0 bg-gray-900/95 backdrop-blur shadow-sm z-10">
+                        <tr>
+                            <th class="p-4 font-semibold text-gray-300 border-b border-gray-700 w-24">Round</th>
+                            <th class="p-4 font-semibold text-gray-300 border-b border-gray-700 text-right">Round Reward</th>
+                            <th class="p-4 font-semibold text-gray-300 border-b border-gray-700 text-right">Total Earned</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody" class="divide-y divide-gray-750">
+                        <!-- rows injected via js -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        // format massive numbers with suffixes to avoid js scientific notation
+        function formatNumber(num) {
+            if (num === 0) return "0.00";
+            if (num < 1000 && num > -1000) return num.toFixed(2);
+            
+            const suffixes = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"];
+            const tier = Math.floor(Math.log10(Math.abs(num)) / 3);
+            
+            // fallback to scientific notation only if it exceeds defined suffixes
+            const suffix = suffixes[tier];
+            if (!suffix && tier >= suffixes.length) {
+                return num.toExponential(2);
+            }
+            
+            const scale = Math.pow(10, tier * 3);
+            const scaled = num / scale;
+            
+            return scaled.toFixed(2) + " " + suffix;
+        }
+
+        // main calculation logic executed on button click
+        function calculate() {
+            console.log("calculating economy progression...");
+            
+            // retrieve and parse inputs
+            const prestige = parseFloat(document.getElementById('prestige').value) || 0;
+            const rank = parseFloat(document.getElementById('rank').value) || 0;
+            const incomeBonus = parseFloat(document.getElementById('incomeBonus').value) || 0;
+
+            // core math for base reward
+            const incomeMultiplier = (prestige * 100) + rank;
+            const baseReward = 1500 * incomeMultiplier * incomeBonus;
+
+            const tbody = document.getElementById('resultsBody');
+            tbody.innerHTML = ''; 
+            
+            // display the hidden table wrapper
+            document.getElementById('resultsSection').classList.remove('hidden');
+
+            let totalEarned = 0;
+            const fragment = document.createDocumentFragment();
+
+            // calculate rounds from 10 to 255, step 5
+            for (let r = 10; r <= 255; r += 5) {
+                const reward = baseReward * Math.pow(1.40, (r / 5.0) - 1.0);
+                totalEarned += reward;
+
+                // construct table row dynamically
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-gray-700/50 transition-colors duration-150';
+
+                const tdRound = document.createElement('td');
+                tdRound.className = 'p-4 text-gray-300 font-medium whitespace-nowrap';
+                tdRound.textContent = r;
+
+                const tdReward = document.createElement('td');
+                tdReward.className = 'p-4 text-emerald-400 font-mono text-right whitespace-nowrap';
+                tdReward.textContent = formatNumber(reward);
+
+                const tdTotal = document.createElement('td');
+                tdTotal.className = 'p-4 text-cyan-400 font-mono text-right font-bold whitespace-nowrap';
+                tdTotal.textContent = formatNumber(totalEarned);
+
+                tr.appendChild(tdRound);
+                tr.appendChild(tdReward);
+                tr.appendChild(tdTotal);
+                fragment.appendChild(tr);
+            }
+
+            // append all rows to dom at once for performance
+            tbody.appendChild(fragment);
+            console.log("calculation complete.");
+        }
+    </script>
+</body>
+</html>
