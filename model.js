@@ -49,7 +49,7 @@
       nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
       loan: true, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 50e12, minGap: 12, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
-      limitBits: Infinity,
+      limitBits: Infinity, costGrowth: 'linear',
       objective: 'ib', horizonH: 1400, round: 150, reinvest: false
     };
   }
@@ -114,13 +114,20 @@
 
   // ---- shard shop ----
   const BASE = { res: 5, yld: 5, intr: 5, rew: 3, disc: 5 };
-  function lUpgradeCost(st, key) {
+  // next level costs base * (L+1) when linear, base * 2^L when doubling (both give 5, 10 for the first two)
+  function lUpgradeCost(st, key, cfg) {
     if (key === 'disc') return st.disc >= 5 ? Infinity : Math.log(5 * (st.disc + 1));
+    if (cfg && cfg.costGrowth === 'double') return Math.log(BASE[key]) + Math.exp(st[key]) * LN2;
     return Math.log(BASE[key]) + lAdd(st[key], 0);
   }
-  // ln of the number of levels affordable with ln-budget lQ: base * (n L + n(n+1)/2) <= Q
-  function lLevelsWithin(st, key, lQ) {
+  // ln of the number of levels affordable with ln-budget lQ: base * (n L + n(n+1)/2) <= Q, or base * 2^L (2^n - 1) <= Q
+  function lLevelsWithin(st, key, lQ, cfg) {
     if (lQ === NEG) return NEG;
+    if (cfg && cfg.costGrowth === 'double' && key !== 'disc') {
+      const x = lQ - Math.log(BASE[key]) - Math.exp(st[key]) * LN2;
+      const n = x > 30 ? Math.floor(x / LN2) : Math.floor(Math.log2(Math.exp(x) + 1) + 1e-12);
+      return n >= 1 ? Math.log(n) : NEG;
+    }
     if (key === 'disc') {
       let n = 0, c = 0;
       while (st.disc + n < 5 && c + 5 * (st.disc + n + 1) <= Math.exp(lQ) * (1 + 1e-12)) { c += 5 * (st.disc + n + 1); n++; }
@@ -149,6 +156,13 @@
       return Math.log(c);
     }
     const lL = st[opt.key], lN = opt.n;
+    if (cfg.costGrowth === 'double') {
+      const L = Math.round(Math.exp(lL)), n = Math.round(Math.exp(lN));
+      const lc = Math.log(BASE[opt.key]) + (L + n) * LN2 + Math.log1p(-Math.pow(2, -n));
+      st.S = lSub(st.S, lc);
+      st[opt.key] = ln(L + n);
+      return lc;
+    }
     const lCost = Math.log(BASE[opt.key]) + lAdd(lN + lL, lN + lAdd(lN, 0) - LN2);
     st.S = lSub(st.S, lCost);
     st[opt.key] = lAdd(lL, lN);
@@ -354,8 +368,8 @@
       const cur = lIB(cfg, st) + growthAt(cfg, st, P0) * H;
       let best = null, bv = cur + 1e-6;
       for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
-        if (lUpgradeCost(st, k) > st.S) continue;
-        const n = Math.max(0, lLevelsWithin(st, k, st.S + Math.log(0.02)));
+        if (lUpgradeCost(st, k, cfg) > st.S) continue;
+        const n = Math.max(0, lLevelsWithin(st, k, st.S + Math.log(0.02), cfg));
         const s = clone(st);
         applyBuy(cfg, s, { key: k, n: n });
         const v = lIB(cfg, s) + growthAt(cfg, s, P0) * H;
@@ -427,8 +441,8 @@
     const out = [];
     if (cfg.allowShop) {
       for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
-        if (lUpgradeCost(st, k) > st.S) continue;
-        const steps = new Set([0, lLevelsWithin(st, k, st.S + Math.log(0.04)), lLevelsWithin(st, k, st.S + Math.log(0.15))]);
+        if (lUpgradeCost(st, k, cfg) > st.S) continue;
+        const steps = new Set([0, lLevelsWithin(st, k, st.S + Math.log(0.04), cfg), lLevelsWithin(st, k, st.S + Math.log(0.15), cfg)]);
         for (const n of steps) if (n >= 0) out.push({ key: k, n: n });
       }
     }

@@ -231,6 +231,8 @@ tbody tr:hover td { background: var(--sunk); }
             <div class="f"><label for="other">Other IB bonuses (+x)</label><input class="num" id="other" type="number" min="0" step="0.1"></div>
             <div class="f"><label for="rawCap">Hourly raw cap</label><input class="num" id="rawCap" type="text" inputmode="decimal"></div>
             <div class="f"><label for="minGap">Min hours between Ascends</label><input class="num" id="minGap" type="number" min="1" step="1"></div>
+            <div class="f"><label for="costGrowth">Upgrade costs after Lv2</label>
+              <select id="costGrowth"><option value="linear">Linear: 15, 20, 25…</option><option value="double">Doubling: 20, 40, 80…</option></select></div>
             <div class="f"><label for="lookahead">Decision window (days)</label><input class="num" id="lookahead" type="number" min="3" max="60" step="1"></div>
           </div>
           <p class="hint">Decision window: at every Ascend, each shop purchase and target prestige is simulated this many days ahead, and the one with the highest Income Bonus at the end of the window wins.</p>
@@ -314,7 +316,8 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
                 <li><b>Rewards</b>: daily and primedaily 100,000, weekly 1,000,000, monthly 10,000,000, each × Income × Income Bonus × (1 + 0.1 × Rewards). The plan holds weekly and monthly for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
                 <li><b>Ascend</b>: needs P ≥ 1000 and 50T in the bank; gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards. Rounding is not confirmed.</li>
-                <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5). That Resonance, Yield, Interest and Rewards add up per level is an assumption; only level 1 is confirmed.</li>
+                <li><b>Shard shop</b>: the first two levels cost 5 and 10 shards (Rewards 3, then 6). Discount is confirmed linear (5, 10, … 25, max 5). For Resonance, Yield, Interest and Rewards the cost after level 2 is unknown: <b>Upgrade costs after Lv2</b> picks linear (5 × level) or doubling (5 × 2^(level−1)). That their effects add +10% per level is an assumption; only level 1 is confirmed.</li>
+                <li><b>Why far projections explode</b>: with linear costs, the levels you can afford grow with the square root of your shards, so each Ascend multiplies the next one. Separately, daily, weekly and monthly pay Income × IB: once prestige is in the hundreds of thousands they outgrow the bank, and spending them on prestige before an Ascend turns them into shards with the square of prestige. Either loop makes the number of digits, not the number itself, grow every day.</li>
                 <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
                 <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when the bank plus everything spent on prestige passes 2^bits: 64-bit is a signed database integer, about 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
                 <li><b>Optimiser</b>: at every Ascend it tries shop purchases and target prestiges, simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
@@ -359,7 +362,7 @@ tbody tr:hover td { background: var(--sunk); }
   const NEG = -Infinity, LN10 = Math.LN10;
   const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
     'other', 'minGap', 'lookahead', 'round', 'rP', 'rR', 'rIB'];
-  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'paste'];
+  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'costGrowth', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'floorShards', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
   const SERIES = [
@@ -385,7 +388,7 @@ tbody tr:hover td { background: var(--sunk); }
     P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
     nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 12, lookahead: 14, round: 150,
     rP: 1000, rR: 100, rIB: 11.74,
-    bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
+    bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', costGrowth: 'linear', paste: '',
     prime: true, boost: true, loan: true, floorShards: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
     rUseAcc: true, rReinvest: false
   };
@@ -504,6 +507,7 @@ tbody tr:hover td { background: var(--sunk); }
     c.round = Math.min(255, Math.max(10, Math.round(num('round', 150) / 5) * 5));
     c.reinvest = $('reinvest').checked;
     c.limitBits = $('limitBits').value === 'none' ? Infinity : parseInt($('limitBits').value, 10);
+    c.costGrowth = $('costGrowth').value === 'double' ? 'double' : 'linear';
     c.horizonH = (new Date($('targetDate').value).getTime() - NOW) / 3600e3;
     c.budget = 500;
     return c;
