@@ -197,6 +197,7 @@ tbody tr:hover td { background: var(--sunk); }
           <div class="fields">
             <div class="f"><label for="bankLv">Bank level</label><select class="num" id="bankLv"></select></div>
             <div class="f"><label for="artifact">Artifact interest (%/hr)</label><input class="num" id="artifact" type="number" min="0" step="0.25"></div>
+            <div class="f"><label for="claimEvery">You claim interest every (hours)</label><input class="num" id="claimEvery" type="number" min="1" step="1"></div>
           </div>
           <p class="derived" id="bankDerived"></p>
         </fieldset>
@@ -311,6 +312,7 @@ tbody tr:hover td { background: var(--sunk); }
               <ul>
                 <li><b>Income Bonus</b> = 1 + 0.5 (Prime) + server booster + other bonuses (these two together cap at 10) + unspent shards × 0.12 (0.10 without Prime) × (1 + 0.1 × Resonance). Matches /stats.</li>
                 <li><b>Bank</b>: raw per hour = min(balance × interest rate, 100B). A claim pays raw × bank bonus × (1 + 0.1 × Interest) × Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance needed for the full raw is 100B ÷ interest rate (0.89T at 11.25%/hr); the plan always keeps that much, and it is also the loan you need after an Ascend to claim the stored hours at full rate. Without a loan the plan assumes you rebuild that balance from /daily and /primedaily by claiming often, and loses the hours it takes. Matches /bank.</li>
+                <li><b>Storage</b>: interest piles up for at most 40 h at bank Lv15, +4 h per level. If you claim less often than that, the plan scales your interest by storage ÷ hours between claims. Claim timing otherwise doesn't matter: what you claim goes into prestige either way, and stored hours survive an Ascend.</li>
                 <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–16 cost 1.5T, 5T, 15T, 50T, 150T; the other levels are extrapolated (500T, 1.5Qa, 5Qa, 15Qa). Artifacts needed for upgrades are ignored.</li>
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
@@ -360,7 +362,7 @@ tbody tr:hover td { background: var(--sunk); }
   const $ = id => document.getElementById(id);
   const KEY = 'nexus-calculator-v2';
   const NEG = -Infinity, LN10 = Math.LN10;
-  const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
+  const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'claimEvery', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
     'other', 'minGap', 'lookahead', 'round', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'costGrowth', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'floorShards', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
@@ -385,7 +387,7 @@ tbody tr:hover td { background: var(--sunk); }
   }
   // example account, replaced by whatever the visitor enters (kept in this browser)
   const DEFAULTS = {
-    P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
+    P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10, claimEvery: 12,
     nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 12, lookahead: 14, round: 150,
     rP: 1000, rR: 100, rIB: 11.74,
     bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', costGrowth: 'linear', paste: '',
@@ -495,6 +497,8 @@ tbody tr:hover td { background: var(--sunk); }
     c.bal = isFinite(bal) ? bal : 0;
     c.bankLv = Math.min(20, Math.max(1, Math.round(num('bankLv', 15))));
     c.bankBonus = 1 + 0.05 * (c.bankLv - 1);
+    c.storage = Math.max(4, 40 + 4 * (c.bankLv - 15));
+    c.claimEvery = Math.max(1, num('claimEvery', 12));
     c.rate = ((c.prime ? 1.25 : 0.25) + Math.max(0, num('artifact', 0))) / 100;
     const raw = parsePts($('rawCap').value);
     c.rawCap = isFinite(raw) && raw > 0 ? raw : 1e11;
@@ -581,7 +585,8 @@ tbody tr:hover td { background: var(--sunk); }
     $('loanAmt').textContent = fmtL(Math.log(M.reserveOf(cfg)));
     $('bankDerived').textContent = '';
     $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'),
-      ' · keep at least ', el('b', null, fmtL(Math.log(M.reserveOf(cfg)))), ' in the bank for full interest');
+      ' · storage ', el('b', null, NF(0).format(cfg.storage) + ' h'), ' · keep at least ', el('b', null, fmtL(Math.log(M.reserveOf(cfg)))), ' in the bank for full interest');
+    if (cfg.claimEvery > cfg.storage) $('bankDerived').append(el('br'), el('b', null, `Storage fills in ${NF(0).format(cfg.storage)} h but you claim every ${NF(0).format(cfg.claimEvery)} h: you lose ${NF(0).format((1 - cfg.storage / cfg.claimEvery) * 100)}% of the interest.`));
   }
 
   // ---- planner rendering ----
@@ -636,7 +641,9 @@ tbody tr:hover td { background: var(--sunk); }
     const tgt = L.targets.length && isFinite(L.targets[0].target) ? Math.round(Math.exp(L.targets[0].target)) : Infinity;
     const Q = M.pAffD(W0 - reserve, d);
 
-    ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), '.'));
+    const lost = cfg.claimEvery > cfg.storage;
+    ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), `. Then claim at least every ${NF(0).format(cfg.storage)} h: at bank Lv${cfg.bankLv} the storage is full after ${NF(0).format(cfg.storage)} h and stops filling.`,
+      lost ? ` You said you claim every ${NF(0).format(cfg.claimEvery)} h, so ${NF(0).format((1 - cfg.storage / cfg.claimEvery) * 100)}% of the interest is lost; the plan already counts that, and bank levels (+4 h each) are worth more to you.` : ''));
     if (buys0.length) {
       const st = M.initState(cfg, 0);
       for (const b of buys0) if (b.key !== 'bank') {

@@ -42,7 +42,7 @@
       shards: 70, prime: true, server: 1.0, other: 0,
       res: 1, yld: 0, intr: 1, rew: 0, disc: 0,
       P: 1000, R: 1, bal: 6616699127772,
-      bankLv: 15, bankBonus: 1.70, rate: 0.1125, rawCap: 1e11,
+      bankLv: 15, bankBonus: 1.70, rate: 0.1125, rawCap: 1e11, storage: 40, claimEvery: 12,
       bankCosts: bankCostTable(),
       rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7 },
       cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
@@ -69,7 +69,10 @@
   function lShardValue(cfg, st) { return Math.log(cfg.prime ? 0.12 : 0.10) + lTenth(st.res); }
   function lIB(cfg, st) { return lAdd(Math.log(constIB(cfg)), lShardValue(cfg, st) + st.S); }
   function bankBonusOf(cfg, st) { return cfg.bankBonus + 0.05 * (st.bankLv - cfg.bankLv); }
-  function lRate(cfg, st) { return Math.log(cfg.rawCap * bankBonusOf(cfg, st)) + lTenth(st.intr) + lIB(cfg, st); }
+  // storage grows 4h per bank level; claiming less often than it fills loses the excess hours
+  function storageOf(cfg, st) { return Math.max(4, cfg.storage + 4 * (st.bankLv - cfg.bankLv)); }
+  function claimFactor(cfg, st) { return Math.min(1, storageOf(cfg, st) / Math.max(cfg.claimEvery, 1e-9)); }
+  function lRate(cfg, st) { return Math.log(cfg.rawCap * bankBonusOf(cfg, st) * claimFactor(cfg, st)) + lTenth(st.intr) + lIB(cfg, st); }
   function dOf(st) { return 1 - 0.05 * st.disc; }
   function lReserve(cfg) { return Math.log(reserveOf(cfg)); }
   function lCostToP(lP, d) { return lP === NEG ? NEG : Math.log(d * F / 2) + lP + lAdd(lP, 0); }
@@ -551,7 +554,7 @@
   }
 
   const api = {
-    F, HOLD, NEG, LN10, defaults, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
+    F, HOLD, NEG, LN10, defaults, storageOf, claimFactor, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
     costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
