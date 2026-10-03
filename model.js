@@ -1,13 +1,30 @@
 (function (root) {
   'use strict';
 
-  // full prestige cost at P0 (rank 1->100); rank r->r+1 costs 250 r^2 (P+1)
-  const F = 82087500;
+  // every quantity that can grow without bound (points, shards, prestige, levels, multipliers)
+  // is stored as its natural log; NEG stands for zero. This reaches about 10^(10^307).
+  const F = 82087500;          // full prestige cost at P0; rank r->r+1 costs 250 r^2 (P+1)
   const RANK_K = 250;
   const HOLD = Infinity;
+  const NEG = -Infinity;
   const KINDS = ['daily', 'prime', 'weekly', 'monthly'];
+  const LN10 = Math.LN10, LN2 = Math.LN2;
+  const L_SMALL = Math.log(1e30);
+  const L_MAX = 1e300;
 
+  const ln = x => (x > 0 ? Math.log(x) : NEG);
   const sumSq = n => (n <= 0 ? 0 : n * (n + 1) * (2 * n + 1) / 6);
+  function lAdd(a, b) {
+    if (a === NEG) return b;
+    if (b === NEG) return a;
+    return a > b ? a + Math.log1p(Math.exp(b - a)) : b + Math.log1p(Math.exp(a - b));
+  }
+  function lSub(a, b) {
+    if (b === NEG) return a;
+    if (!(a > b)) return NEG;
+    return a + Math.log1p(-Math.exp(b - a));
+  }
+  const lTenth = lL => lAdd(0, lL + Math.log(0.1));   // ln(1 + 0.1 L)
 
   // known: Lv12 1.5T .. Lv16 150T; the rest follows the same x3.33 / x3 alternation
   function bankCostTable() {
@@ -32,56 +49,62 @@
       nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
       loan: true, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 50e12, minGap: 12, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
+      limitBits: Infinity,
       objective: 'ib', horizonH: 1400, round: 150, reinvest: false
     };
   }
 
-  // ---- base formulas ----
-  function shardValue(cfg, st) { return (cfg.prime ? 0.12 : 0.10) * (1 + 0.1 * st.res); }
-  function ibOf(cfg, st) {
-    return 1 + (cfg.prime ? 0.5 : 0) + Math.min(cfg.server + cfg.other, 10) + shardValue(cfg, st) * st.S;
-  }
-  function bankBonusOf(cfg, st) { return cfg.bankBonus + 0.05 * (st.bankLv - cfg.bankLv); }
-  function bankRateOf(cfg, st) { return cfg.rawCap * bankBonusOf(cfg, st) * (1 + 0.1 * st.intr) * ibOf(cfg, st); }
-  function dOf(st) { return 1 - 0.05 * st.disc; }
-  function reserveOf(cfg) { return cfg.rawCap / cfg.rate; }
-  function costToP(P, d) { return d * F * P * (P + 1) / 2; }
+  // ---- plain-number helpers (current state, small values) ----
+  function costToPD(P, d) { return d * F * P * (P + 1) / 2; }
   function cumPR(P, R, d) { return d * (F * P * (P + 1) / 2 + (P + 1) * RANK_K * sumSq(R - 1)); }
-  function pAff(W, d) {
+  function pAffD(W, d) {
     if (!(W > 0)) return 0;
     const x = Math.floor((-1 + Math.sqrt(1 + 8 * W / (d * F))) / 2 + 1e-9);
-    return costToP(x, d) <= W * (1 + 1e-12) ? x : x - 1;
+    return costToPD(x, d) <= W * (1 + 1e-12) ? x : x - 1;
+  }
+  function reserveOf(cfg) { return cfg.rawCap / cfg.rate; }
+
+  // ---- base formulas (log domain) ----
+  function constIB(cfg) { return 1 + (cfg.prime ? 0.5 : 0) + Math.min(cfg.server + cfg.other, 10); }
+  function lShardValue(cfg, st) { return Math.log(cfg.prime ? 0.12 : 0.10) + lTenth(st.res); }
+  function lIB(cfg, st) { return lAdd(Math.log(constIB(cfg)), lShardValue(cfg, st) + st.S); }
+  function bankBonusOf(cfg, st) { return cfg.bankBonus + 0.05 * (st.bankLv - cfg.bankLv); }
+  function lRate(cfg, st) { return Math.log(cfg.rawCap * bankBonusOf(cfg, st)) + lTenth(st.intr) + lIB(cfg, st); }
+  function dOf(st) { return 1 - 0.05 * st.disc; }
+  function lReserve(cfg) { return Math.log(reserveOf(cfg)); }
+  function lCostToP(lP, d) { return lP === NEG ? NEG : Math.log(d * F / 2) + lP + lAdd(lP, 0); }
+  function lPAff(lW, d) {
+    if (lW === NEG) return NEG;
+    if (lW < L_SMALL) return ln(pAffD(Math.exp(lW), d));
+    return 0.5 * (Math.log(2 / (d * F)) + lW);
   }
   // best (P+1)*R affordable with W: sitting at R100 of P is worth 100(P+1)
-  function pmAt(W, d) {
-    const Q = pAff(W, d);
-    if (Q >= 1) return 100 * Q;
-    if (!(W > 0)) return 1;
+  function lPm(lW, d) {
+    const lQ = lPAff(lW, d);
+    if (lQ !== NEG) return Math.log(100) + lQ;
+    if (lW === NEG) return 0;
+    const W = Math.exp(lW);
     let R = Math.floor(Math.cbrt(3 * W / (RANK_K * d))) + 1;
     while (R > 1 && d * RANK_K * sumSq(R - 1) > W) R--;
-    return Math.max(1, Math.min(100, R));
+    return Math.log(Math.max(1, Math.min(100, R)));
   }
-  function shardsRaw(st, P) { return 10 * (P / 1000) * (P / 1000) * (1 + 0.1 * st.yld); }
-  function shardsAt(cfg, st, P) {
-    const v = shardsRaw(st, P);
-    return cfg.floorShards ? Math.floor(v + 1e-9) : v;
+  function lShardsRaw(st, lP) { return Math.log(10) + 2 * (lP - Math.log(1000)) + lTenth(st.yld); }
+  function lShardsAt(cfg, st, lP) {
+    const l = lShardsRaw(st, lP);
+    if (!cfg.floorShards || l > Math.log(1e6)) return l;
+    return ln(Math.floor(Math.exp(l) + 1e-9));
   }
-  function minPforShards(st, k) {
-    let P = Math.ceil(1000 * Math.sqrt(k / (10 * (1 + 0.1 * st.yld))) - 1e-9);
-    for (let i = 0; i < 3 && shardsRaw(st, P) * (1 + 1e-12) < k; i++) P++;
-    return P;
+  function lMinPforShards(st, k) {
+    const y = Math.exp(lTenth(st.yld));
+    let P = Math.ceil(1000 * Math.sqrt(k / (10 * y)) - 1e-9);
+    for (let i = 0; i < 3 && 10 * (P / 1000) * (P / 1000) * y * (1 + 1e-12) < k; i++) P++;
+    return Math.log(P);
   }
-  function rhoOf(cfg, st) {
+  function lRho(cfg, st) {
     const b = cfg.rewBase, c = cfg.cooldown;
     let r = b.daily / c.daily + b.weekly / c.weekly + b.monthly / c.monthly;
     if (cfg.prime) r += b.prime / c.prime;
-    return r * (1 + 0.1 * st.rew);
-  }
-  function upgradeCost(st, key) {
-    const L = st[key];
-    if (key === 'rew') return 3 * (L + 1);
-    if (key === 'disc' && L >= 5) return Infinity;
-    return 5 * (L + 1);
+    return Math.log(r) + lTenth(st.rew);
   }
   function blockSum(round) {
     let s = 0;
@@ -89,59 +112,105 @@
     return s;
   }
 
-  // ---- P* maximizing log growth of IB per hour ----
-  function growthAt(cfg, st, P) {
-    const d = dOf(st);
-    const C = costToP(P, d);
-    const I = bankRateOf(cfg, st);
-    const ib0 = ibOf(cfg, st);
-    const rr = rhoOf(cfg, st) * ib0 * 100 * (2 / 3) * P * (C / (C + cfg.minBal));
-    const dt = (C + cfg.minBal) / (I + rr);
-    const gain = shardsAt(cfg, st, P);
-    const ib1 = ib0 + shardValue(cfg, st) * gain;
-    return Math.log(ib1 / ib0) / dt;
+  // ---- shard shop ----
+  const BASE = { res: 5, yld: 5, intr: 5, rew: 3, disc: 5 };
+  function lUpgradeCost(st, key) {
+    if (key === 'disc') return st.disc >= 5 ? Infinity : Math.log(5 * (st.disc + 1));
+    return Math.log(BASE[key]) + lAdd(st[key], 0);
   }
-  function snapTarget(cfg, st, P) {
-    P = Math.max(cfg.minP, Math.round(P));
-    if (!cfg.floorShards || shardsRaw(st, P) >= 1e6) return P;
-    const k = Math.max(shardsAt(cfg, st, cfg.minP), Math.floor(shardsRaw(st, P) + 1e-9));
-    return Math.max(cfg.minP, minPforShards(st, k));
+  // ln of the number of levels affordable with ln-budget lQ: base * (n L + n(n+1)/2) <= Q
+  function lLevelsWithin(st, key, lQ) {
+    if (lQ === NEG) return NEG;
+    if (key === 'disc') {
+      let n = 0, c = 0;
+      while (st.disc + n < 5 && c + 5 * (st.disc + n + 1) <= Math.exp(lQ) * (1 + 1e-12)) { c += 5 * (st.disc + n + 1); n++; }
+      return ln(n);
+    }
+    const base = BASE[key], lL = st[key];
+    if (lQ < Math.log(1e15) && lL < Math.log(1e7)) {
+      const L = Math.round(Math.exp(lL)), q = Math.exp(lQ) / base;
+      let n = Math.floor((-(2 * L + 1) + Math.sqrt((2 * L + 1) * (2 * L + 1) + 8 * q)) / 2 + 1e-9);
+      for (let i = 0; i < 4 && n > 0 && (n * L + n * (n + 1) / 2) > q * (1 + 1e-12); i++) n--;
+      return ln(n);
+    }
+    const lA = lAdd(LN2 + lL, 0);
+    const lB = Math.log(8 / base) + lQ;
+    const lN = lB - lAdd(0.5 * lAdd(2 * lA, lB), lA) - LN2;
+    return lN >= 0 ? lN : NEG;
+  }
+  function applyBuy(cfg, st, opt) {
+    if (opt.key === 'bank') { st.bankNeed = Math.log(cfg.bankCosts[st.bankLv + 1]); return st.bankNeed; }
+    if (opt.key === 'disc') {
+      const n = Math.round(Math.exp(opt.n));
+      let c = 0;
+      for (let i = 0; i < n; i++) c += 5 * (st.disc + i + 1);
+      st.disc += n; st.S = lSub(st.S, Math.log(c));
+      settleHeld(cfg, st);
+      return Math.log(c);
+    }
+    const lL = st[opt.key], lN = opt.n;
+    const lCost = Math.log(BASE[opt.key]) + lAdd(lN + lL, lN + lAdd(lN, 0) - LN2);
+    st.S = lSub(st.S, lCost);
+    st[opt.key] = lAdd(lL, lN);
+    return lCost;
+  }
+
+  // ---- P* maximizing the IB growth per hour ----
+  function growthAt(cfg, st, lP) {
+    const d = dOf(st);
+    const lC = lCostToP(lP, d);
+    const lI = lRate(cfg, st);
+    const lIB0 = lIB(cfg, st);
+    const lNeed = lAdd(lC, Math.log(cfg.minBal));
+    const lRr = lRho(cfg, st) + lIB0 + Math.log(100 * 2 / 3) + lP + lC - lNeed;
+    const dt = Math.max(cfg.minGap, Math.exp(lNeed - lAdd(lI, lRr)));
+    const lGain = lShardsAt(cfg, st, lP);
+    const lIB1 = lAdd(lIB0, lShardValue(cfg, st) + lGain);
+    return (lIB1 - lIB0) / dt;
+  }
+  function snapTarget(cfg, st, lP) {
+    lP = Math.max(Math.log(cfg.minP), lP);
+    if (lP < L_SMALL) lP = Math.log(Math.round(Math.exp(lP)));
+    if (!cfg.floorShards || lShardsRaw(st, lP) >= Math.log(1e6)) return lP;
+    const kMin = Math.round(Math.exp(lShardsAt(cfg, st, Math.log(cfg.minP))));
+    const k = Math.max(kMin, Math.floor(Math.exp(lShardsRaw(st, lP)) + 1e-9));
+    return Math.max(Math.log(cfg.minP), lMinPforShards(st, k));
   }
   function pStar(cfg, st) {
-    let best = cfg.minP, bg = -Infinity;
     const lo = Math.log(cfg.minP);
-    const hi = Math.log(Math.max(cfg.minP * 400, 20 * pAff(bankRateOf(cfg, st) * 240, dOf(st))));
+    const hi = Math.max(lo + Math.log(400), Math.log(20) + lPAff(lRate(cfg, st) + Math.log(240), dOf(st)));
     const N = 48;
+    let best = lo, bg = -Infinity;
     for (let i = 0; i <= N; i++) {
-      const P = Math.exp(lo + (hi - lo) * i / N);
-      const g = growthAt(cfg, st, P);
-      if (g > bg) { bg = g; best = P; }
+      const x = lo + (hi - lo) * i / N;
+      const g = growthAt(cfg, st, x);
+      if (g > bg) { bg = g; best = x; }
     }
-    let a = Math.max(lo, Math.log(best) - (hi - lo) / N), b = Math.min(hi, Math.log(best) + (hi - lo) / N);
+    let a = Math.max(lo, best - (hi - lo) / N), b = Math.min(hi, best + (hi - lo) / N);
     const phi = (Math.sqrt(5) - 1) / 2;
     for (let i = 0; i < 40; i++) {
       const x1 = b - phi * (b - a), x2 = a + phi * (b - a);
-      if (growthAt(cfg, st, Math.exp(x1)) > growthAt(cfg, st, Math.exp(x2))) b = x2; else a = x1;
+      if (growthAt(cfg, st, x1) > growthAt(cfg, st, x2)) b = x2; else a = x1;
     }
-    let P = Math.exp((a + b) / 2);
-    if (cfg.floorShards && shardsRaw(st, P) < 1e6) {
-      const k0 = Math.floor(shardsRaw(st, P));
-      let bk = snapTarget(cfg, st, P), bgk = -Infinity;
+    const lP = (a + b) / 2;
+    if (cfg.floorShards && lShardsRaw(st, lP) < Math.log(1e6)) {
+      const k0 = Math.floor(Math.exp(lShardsRaw(st, lP)));
+      let bk = snapTarget(cfg, st, lP), bgk = -Infinity;
       for (let k = Math.max(1, k0 - 4); k <= k0 + 5; k++) {
-        const Pk = Math.max(cfg.minP, minPforShards(st, k));
+        const Pk = Math.max(lo, lMinPforShards(st, k));
         const g = growthAt(cfg, st, Pk);
         if (g > bgk) { bgk = g; bk = Pk; }
       }
       return bk;
     }
-    return Math.max(cfg.minP, Math.round(P));
+    return snapTarget(cfg, st, lP);
   }
 
   // ---- event-driven simulation ----
   function initState(cfg, t0) {
     const st = {
-      t: t0 || 0, S: cfg.shards, res: cfg.res, yld: cfg.yld, intr: cfg.intr, rew: cfg.rew, disc: cfg.disc,
-      bankLv: cfg.bankLv, Wp: 0, L: 0, target: HOLD, bankNeed: 0, asc: 0, gained: 0, lastAsc: -Infinity,
+      t: t0 || 0, S: ln(cfg.shards), res: ln(cfg.res), yld: ln(cfg.yld), intr: ln(cfg.intr), rew: ln(cfg.rew), disc: cfg.disc,
+      bankLv: cfg.bankLv, Wp: NEG, L: NEG, target: HOLD, bankNeed: NEG, lastAsc: -Infinity,
       next: {}, heldP: cfg.P, heldR: cfg.R
     };
     for (const k of KINDS) st.next[k] = st.t + Math.max(0, cfg.nextIn[k]);
@@ -150,8 +219,8 @@
   // held prestige is valued at the current discount
   function settleHeld(cfg, st) {
     if (st.heldP === null) return;
-    st.Wp = cumPR(st.heldP, st.heldR, dOf(st));
-    st.L = cfg.bal;
+    st.Wp = ln(cumPR(st.heldP, st.heldR, dOf(st)));
+    st.L = ln(cfg.bal);
   }
   function clone(st) {
     const c = Object.assign({}, st);
@@ -159,23 +228,21 @@
     return c;
   }
   function rebalance(cfg, st) {
-    if (st.bankNeed > 0) return;
-    const res = reserveOf(cfg);
-    const Ct = st.target === HOLD ? Infinity : costToP(st.target, dOf(st));
-    if (st.L > res && st.Wp < Ct) {
-      const mv = Math.min(st.L - res, Ct - st.Wp);
-      st.Wp += mv; st.L -= mv;
+    if (st.bankNeed !== NEG) return;
+    const lRes = lReserve(cfg);
+    const lCt = st.target === HOLD ? Infinity : lCostToP(st.target, dOf(st));
+    if (st.L > lRes && st.Wp < lCt) {
+      const avail = lSub(st.L, lRes);
+      const room = lCt === Infinity ? Infinity : lSub(lCt, st.Wp);
+      if (avail <= room) { st.Wp = lAdd(st.Wp, avail); st.L = lRes; }
+      else { st.Wp = lCt; st.L = lSub(st.L, room); }
     }
   }
-  const INT64 = 9.223372036854776e18;
   function advance(cfg, st, dt) {
     if (dt <= 0) return;
-    st.L += bankRateOf(cfg, st) * dt;
+    st.L = lAdd(st.L, lRate(cfg, st) + Math.log(dt));
     st.t += dt;
     rebalance(cfg, st);
-  }
-  function markLimit(st, log, amount) {
-    if (log && log.int64At === undefined && (amount > INT64 || st.L > INT64)) log.int64At = st.t;
   }
   function deferOf(cfg, st, k) {
     return (k === 'weekly' || k === 'monthly') && st.target !== HOLD ? cfg.deferFrac * cfg.cooldown[k] : 0;
@@ -183,17 +250,16 @@
   // weekly and monthly wait (up to deferFrac of their cooldown) for the next ascend, where prestige peaks
   function claimRewards(cfg, st, log, atAscend) {
     if (!cfg.useRewards) return;
-    const pm = pmAt(st.Wp, dOf(st));
-    const ib = ibOf(cfg, st);
+    const lpm = lPm(st.Wp, dOf(st));
+    const lib = lIB(cfg, st);
     for (const k of KINDS) {
       if (k === 'prime' && !cfg.prime) continue;
       const due = atAscend ? st.next[k] : st.next[k] + deferOf(cfg, st, k);
       if (due <= st.t + 1e-9) {
-        const amt = cfg.rewBase[k] * pm * ib * (1 + 0.1 * st.rew);
-        st.L += amt;
-        markLimit(st, log, amt);
+        const amt = Math.log(cfg.rewBase[k]) + lpm + lib + lTenth(st.rew);
+        st.L = lAdd(st.L, amt);
         st.next[k] = st.t + cfg.cooldown[k];
-        if (log) log.rewards.push({ t: st.t, kind: k, pm: pm, amount: amt });
+        if (log) log.rewards.push({ t: st.t, kind: k, lpm: lpm, lamount: amt });
       }
     }
     rebalance(cfg, st);
@@ -210,126 +276,136 @@
   }
   function restartPenalty(cfg, st) {
     if (cfg.loan) return 0;
-    const ib = ibOf(cfg, st);
-    const b0 = cfg.rewBase.daily * ib * (cfg.prime ? 2 : 1);
-    const k = cfg.rate * bankBonusOf(cfg, st) * (1 + 0.1 * st.intr) * ib;
-    return Math.max(0, Math.log(reserveOf(cfg) / b0) / k);
+    const lib = lIB(cfg, st);
+    const lb0 = Math.log(cfg.rewBase.daily * (cfg.prime ? 2 : 1)) + lib;
+    const lk = Math.log(cfg.rate * bankBonusOf(cfg, st)) + lTenth(st.intr) + lib;
+    return Math.max(0, (lReserve(cfg) - lb0) / Math.exp(Math.min(lk, 700)));
   }
   function doAscend(cfg, st, log) {
     const d = dOf(st);
-    const P = Math.max(st.target === HOLD ? 0 : st.target, pAff(st.Wp + st.L - cfg.minBal, d));
-    const Pe = cfg.floorShards ? Math.max(cfg.minP, minPforShards(st, shardsAt(cfg, st, P))) : P;
-    const gain = shardsAt(cfg, st, P);
-    st.S += gain; st.gained += gain; st.asc++;
-    if (log) log.ascends.push({ t: st.t, P: P, Pmin: Pe, gain: gain, S: st.S, ib: ibOf(cfg, st), rate: bankRateOf(cfg, st), buys: [] });
-    st.Wp = 0; st.L = 0; st.heldP = null; st.lastAsc = st.t;
+    const lW = lAdd(st.Wp, st.L);
+    const lP = Math.max(st.target === HOLD ? NEG : st.target, lPAff(lSub(lW, Math.log(cfg.minBal)), d));
+    const gain = lShardsAt(cfg, st, lP);
+    st.S = lAdd(st.S, gain);
+    if (log) log.ascends.push({ t: st.t, lP: lP, lgain: gain, lS: st.S, lib: lIB(cfg, st), lrate: lRate(cfg, st), buys: [] });
+    st.Wp = NEG; st.L = NEG; st.heldP = null; st.lastAsc = st.t;
     const pen = restartPenalty(cfg, st);
     if (pen > 0) st.t += pen;
-    return P;
+    return lP;
   }
   function canAscend(cfg, st) {
-    return st.bankNeed <= 0 && pAff(st.Wp + st.L - cfg.minBal, dOf(st)) >= cfg.minP;
+    return st.bankNeed === NEG && lPAff(lSub(lAdd(st.Wp, st.L), Math.log(cfg.minBal)), dOf(st)) >= Math.log(cfg.minP) - 1e-12;
   }
 
   // end-of-horizon rule of the base policy
   function baseShouldAscend(cfg, st, T) {
     const rem = T - st.t;
-    const gain = shardsAt(cfg, st, Math.max(st.target, pAff(st.Wp + st.L - cfg.minBal, dOf(st))));
-    const after = clone(st); after.S += gain;
-    const I1 = bankRateOf(cfg, after);
+    const d = dOf(st);
+    const lW = lAdd(st.Wp, st.L);
+    const lP = Math.max(st.target, lPAff(lSub(lW, Math.log(cfg.minBal)), d));
+    const after = clone(st);
+    after.S = lAdd(after.S, lShardsAt(cfg, st, lP));
+    const lI1 = lRate(cfg, after);
     if (cfg.objective === 'bo2') {
-      const res = reserveOf(cfg);
-      const Ih = bankRateOf(cfg, st);
-      const vh = pmAt(st.Wp + st.L + Ih * rem - res, dOf(st)) * ibOf(cfg, st);
-      const va = pmAt(I1 * rem - res, dOf(st)) * ibOf(cfg, after);
+      const lRes = lReserve(cfg);
+      const lIh = lRate(cfg, st);
+      const vh = lPm(lSub(lAdd(lW, lIh + Math.log(rem)), lRes), d) + lIB(cfg, st);
+      const va = lPm(lSub(lI1 + Math.log(rem), lRes), d) + lIB(cfg, after);
       return va > vh;
     }
-    const fresh = (costToP(cfg.minP, dOf(st)) + cfg.minBal) / I1;
+    const fresh = Math.exp(lAdd(lCostToP(Math.log(cfg.minP), d), Math.log(cfg.minBal)) - lI1);
     return fresh < rem;
   }
 
-  // final value for the chosen objective
+  // ln of the final value for the chosen objective
   function finalValue(cfg, st, log) {
     if (cfg.objective === 'bo2') {
-      const ib = ibOf(cfg, st);
+      const lib = lIB(cfg, st);
       const d = dOf(st);
-      let Wp = st.Wp + Math.max(0, st.L - reserveOf(cfg));
-      let pm = pmAt(Wp, d);
-      const pm0 = pm;
-      let tot = 0;
+      let lWp = lAdd(st.Wp, lSub(st.L, lReserve(cfg)));
+      let lpm = lPm(lWp, d);
+      const lpm0 = lpm;
+      let tot = NEG;
       for (let R = 10; R <= cfg.round; R += 5) {
-        const r = 1500 * pm * ib * Math.pow(1.4, R / 5 - 1);
-        tot += r;
-        if (cfg.reinvest) { Wp += r; pm = pmAt(Wp, d); }
+        const r = Math.log(1500) + lpm + lib + (R / 5 - 1) * Math.log(1.4);
+        tot = lAdd(tot, r);
+        if (cfg.reinvest) { lWp = lAdd(lWp, r); lpm = lPm(lWp, d); }
       }
-      if (log) log.final = { pm: pm0, pmEnd: pm, ib: ib, reward: tot };
+      if (log) log.final = { lpm: lpm0, lpmEnd: lpm, lib: lib, lreward: tot };
       return tot;
     }
     const fs = clone(st);
     if (canAscend(cfg, fs)) {
       fs.target = HOLD;
-      const P = doAscend(cfg, fs, null);
-      if (log) log.finalAscend = { t: fs.t, P: P, gain: fs.S - st.S, S: fs.S, ib: ibOf(cfg, fs), rate: bankRateOf(cfg, fs) };
+      const lP = doAscend(cfg, fs, null);
+      if (log) log.finalAscend = { t: fs.t, lP: lP, lgain: lSub(fs.S, st.S), lS: fs.S, lib: lIB(cfg, fs), lrate: lRate(cfg, fs) };
     }
-    if (log) log.final = { ib: ibOf(cfg, fs), rate: bankRateOf(cfg, fs), S: fs.S };
-    return cfg.objective === 'income' ? bankRateOf(cfg, fs) : ibOf(cfg, fs);
+    if (log) log.final = { lib: lIB(cfg, fs), lrate: lRate(cfg, fs), lS: fs.S };
+    return cfg.objective === 'income' ? lRate(cfg, fs) : lIB(cfg, fs);
   }
 
-  // policy: decide() applies purchases and sets st.target; shouldAscend() gates each ascend
   // cheap myopic shop rule used inside rollouts: buy while ln(IB) + one week of growth improves
   function heuristicBuys(cfg, st) {
     if (!cfg.allowShop) return;
     const H = 168;
     const P0 = pStar(cfg, st);
     for (let i = 0; i < 40; i++) {
-      const cur = Math.log(ibOf(cfg, st)) + growthAt(cfg, st, P0) * H;
+      const cur = lIB(cfg, st) + growthAt(cfg, st, P0) * H;
       let best = null, bv = cur + 1e-6;
       for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
-        if (upgradeCost(st, k) > st.S) continue;
-        const n = Math.max(1, levelsWithin(st, k, 0.02 * st.S));
+        if (lUpgradeCost(st, k) > st.S) continue;
+        const n = Math.max(0, lLevelsWithin(st, k, st.S + Math.log(0.02)));
         const s = clone(st);
         applyBuy(cfg, s, { key: k, n: n });
-        const v = Math.log(ibOf(cfg, s)) + growthAt(cfg, s, P0) * H;
-        if (v > bv) { bv = v; best = k; }
+        const v = lIB(cfg, s) + growthAt(cfg, s, P0) * H;
+        if (v > bv) { bv = v; best = { key: k, n: n }; }
       }
       if (!best) break;
-      applyBuy(cfg, st, { key: best, n: Math.max(1, levelsWithin(st, best, 0.02 * st.S)) });
+      applyBuy(cfg, st, best);
     }
   }
+  // policy: decide() applies purchases and sets st.target; shouldAscend() gates each ascend
   const basePolicy = {
     decide(cfg, st) { heuristicBuys(cfg, st); st.target = pStar(cfg, st); },
     shouldAscend: baseShouldAscend
   };
   function fixedPolicy(P) {
     return {
-      decide(cfg, st) { st.target = snapTarget(cfg, st, P); },
+      decide(cfg, st) { st.target = snapTarget(cfg, st, Math.log(P)); },
       shouldAscend: baseShouldAscend
     };
+  }
+
+  function limitCheck(cfg, st, log) {
+    const lW = lAdd(st.Wp, st.L);
+    if (lW > cfg.limitBits * LN2) { if (log) log.limitAt = st.t; return true; }
+    if (lW > L_MAX || st.S > L_MAX) { if (log) log.overflowAt = st.t; return true; }
+    return false;
   }
 
   function run(cfg, st, T, policy, log, firstDone) {
     if (!firstDone) policy.decide(cfg, st, T, log);
     rebalance(cfg, st);
+    const lMinBal = Math.log(cfg.minBal);
     let guard = 0;
-    while (st.t < T - 1e-9 && guard++ < 200000) {
-      const I = bankRateOf(cfg, st);
+    while (st.t < T - 1e-9 && guard++ < 400000) {
+      const lI = lRate(cfg, st);
       const tr = nextRewardTime(cfg, st);
       let te;
-      if (st.bankNeed > 0) te = st.t + Math.max(0, st.bankNeed - st.L) / I;
+      if (st.bankNeed !== NEG) te = st.t + Math.exp(lSub(st.bankNeed, st.L) - lI);
       else if (st.target === HOLD) te = Infinity;
-      else te = Math.max(st.lastAsc + cfg.minGap, st.t + Math.max(0, costToP(st.target, dOf(st)) + cfg.minBal - st.Wp - st.L) / I);
+      else te = Math.max(st.lastAsc + cfg.minGap, st.t + Math.exp(lSub(lAdd(lCostToP(st.target, dOf(st)), lMinBal), lAdd(st.Wp, st.L)) - lI));
       const tn = Math.min(tr, te, T);
       advance(cfg, st, tn - st.t);
+      if (limitCheck(cfg, st, log)) { st.stopped = true; break; }
       if (tn >= T - 1e-9) break;
       if (tn === tr && tr <= te) { claimRewards(cfg, st, log); continue; }
-      if (st.bankNeed > 0) {
-        st.L -= st.bankNeed; st.bankNeed = 0; st.bankLv++;
+      if (st.bankNeed !== NEG) {
+        st.L = lSub(st.L, st.bankNeed); st.bankNeed = NEG; st.bankLv++;
         if (log) log.bank.push({ t: st.t, lv: st.bankLv });
         rebalance(cfg, st);
         continue;
       }
-      if (st.Wp + st.L > 1e280 || !(st.S < 1e290)) { st.overflow = true; if (log) log.overflowAt = st.t; break; }
-      markLimit(st, log, 0);
       if (policy.shouldAscend(cfg, st, T)) {
         claimRewards(cfg, st, log, true);
         doAscend(cfg, st, log);
@@ -340,44 +416,22 @@
         rebalance(cfg, st);
       }
     }
-    if (!st.overflow) st.t = Math.max(st.t, T);
+    if (!st.stopped) st.t = Math.max(st.t, T);
     return finalValue(cfg, st, log);
   }
 
   function newLog() { return { ascends: [], rewards: [], bank: [], buys: [], targets: [] }; }
 
-  // levels n affordable from level L: base * (n L + n(n+1)/2) <= shards
-  function levelsWithin(st, key, shards) {
-    const base = key === 'rew' ? 3 : 5;
-    const L = st[key];
-    const q = shards / base;
-    let n = Math.floor((-(2 * L + 1) + Math.sqrt((2 * L + 1) * (2 * L + 1) + 8 * q)) / 2 + 1e-9);
-    for (let i = 0; i < 4 && n > 0 && base * (n * L + n * (n + 1) / 2) > shards; i++) n -= Math.max(1, Math.ceil(n * 1e-12));
-    if (key === 'disc') n = Math.min(n, 5 - L);
-    return Math.max(0, n);
-  }
-  function applyBuy(cfg, st, opt) {
-    if (opt.key === 'bank') {
-      st.bankNeed = cfg.bankCosts[st.bankLv + 1];
-      return 0;
-    }
-    const base = opt.key === 'rew' ? 3 : 5;
-    const L = st[opt.key], n = opt.n;
-    const cost = base * (n * L + n * (n + 1) / 2);
-    st.S -= cost; st[opt.key] += n;
-    if (opt.key === 'disc') settleHeld(cfg, st);
-    return cost;
-  }
   function buyOptions(cfg, st) {
     const out = [];
     if (cfg.allowShop) {
       for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
-        if (levelsWithin(st, k, st.S) < 1) continue;
-        const steps = new Set([1, levelsWithin(st, k, 0.04 * st.S), levelsWithin(st, k, 0.15 * st.S)]);
-        for (const n of steps) if (n >= 1) out.push({ key: k, n: n });
+        if (lUpgradeCost(st, k) > st.S) continue;
+        const steps = new Set([0, lLevelsWithin(st, k, st.S + Math.log(0.04)), lLevelsWithin(st, k, st.S + Math.log(0.15))]);
+        for (const n of steps) if (n >= 0) out.push({ key: k, n: n });
       }
     }
-    if (cfg.allowBank && st.bankLv < 20 && st.bankNeed <= 0 && cfg.bankCosts[st.bankLv + 1] > 0) out.push({ key: 'bank', n: 1 });
+    if (cfg.allowBank && st.bankLv < 20 && st.bankNeed === NEG && cfg.bankCosts[st.bankLv + 1] > 0) out.push({ key: 'bank', n: 0 });
     return out;
   }
 
@@ -386,14 +440,32 @@
     const Te = Math.min(T, st.t + cfg.lookahead);
     const c = Te < T ? (cfg._ibCfg || (cfg._ibCfg = Object.assign({}, cfg, { objective: 'ib' }))) : cfg;
     s.target = targetOverride !== undefined ? targetOverride : pStar(cfg, s);
-    const v = run(c, s, Te, basePolicy, null, true);
-    return Math.log(v > 0 ? v : 1e-300);
+    return run(c, s, Te, basePolicy, null, true);
+  }
+
+  function logBuy(log, st, key, lfrom, lto, lcost) {
+    const rec = { t: st.t, key: key, lfrom: lfrom, lto: lto, lcost: lcost };
+    log.buys.push(rec);
+    const last = log.ascends[log.ascends.length - 1];
+    if (last && Math.abs(last.t - st.t) < 1e-6) last.buys.push(rec);
   }
 
   // planner: greedy purchases and target choice, each scored by a base-policy rollout
   function plannerPolicy(budget) {
     return {
       decide(cfg, st, T, log) {
+        if (budget.left <= 0) {
+          const before = clone(st);
+          basePolicy.decide(cfg, st);
+          if (log) {
+            for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
+              const was = k === 'disc' ? ln(before.disc) : before[k], now = k === 'disc' ? ln(st.disc) : st[k];
+              if (now > was) logBuy(log, st, k, was, now, NEG);
+            }
+            log.targets.push({ t: st.t, target: st.target, pstar: st.target });
+          }
+          return;
+        }
         let quota = Math.max(12, Math.min(160, Math.floor(budget.left / 25)));
         let iter = 0;
         while (iter++ < 12 && quota > 0 && budget.left > 0) {
@@ -408,24 +480,19 @@
             if (v > bv) { bv = v; best = o; }
           }
           if (!best) break;
-          const before = best.key === 'bank' ? st.bankLv : st[best.key];
-          const cost = best.key === 'bank' ? cfg.bankCosts[st.bankLv + 1] : applyBuy(cfg, st, best);
-          if (best.key === 'bank') applyBuy(cfg, st, best);
-          if (log) {
-            const rec = { t: st.t, key: best.key, n: best.n, cost: cost, from: before, level: before + best.n };
-            log.buys.push(rec);
-            const last = log.ascends[log.ascends.length - 1];
-            if (last && Math.abs(last.t - st.t) < 1e-6) last.buys.push(rec);
-          }
+          const lfrom = best.key === 'bank' ? Math.log(st.bankLv) : best.key === 'disc' ? ln(st.disc) : st[best.key];
+          const lcost = applyBuy(cfg, st, best);
+          const lto = best.key === 'bank' ? Math.log(st.bankLv + 1) : best.key === 'disc' ? ln(st.disc) : st[best.key];
+          if (log) logBuy(log, st, best.key, lfrom, lto, lcost);
           if (best.key === 'bank') break;
         }
         const ps = pStar(cfg, st);
-        const W = st.Wp + st.L;
+        const lW = lAdd(st.Wp, st.L);
         const cands = new Set([HOLD]);
-        for (const m of [0.55, 0.75, 0.9, 1, 1.12, 1.3, 1.6, 2, 2.6]) cands.add(snapTarget(cfg, st, ps * m));
-        cands.add(snapTarget(cfg, st, cfg.minP));
-        const aff = pAff(W - cfg.minBal, dOf(st));
-        if (aff >= cfg.minP) cands.add(snapTarget(cfg, st, aff));
+        for (const m of [0.55, 0.75, 0.9, 1, 1.12, 1.3, 1.6, 2, 2.6]) cands.add(snapTarget(cfg, st, ps + Math.log(m)));
+        cands.add(snapTarget(cfg, st, Math.log(cfg.minP)));
+        const aff = lPAff(lSub(lW, Math.log(cfg.minBal)), dOf(st));
+        if (aff >= Math.log(cfg.minP)) cands.add(snapTarget(cfg, st, aff));
         let bestT = ps, bestV = -Infinity;
         for (const P of cands) {
           const v = rollout(cfg, st, T, P); budget.left--;
@@ -442,11 +509,11 @@
     const st = clone(st0);
     const log = newLog();
     const value = run(cfg, st, T, policy, log, false);
-    const pts = [{ t: st0.t, ib: ibOf(cfg, st0), rate: bankRateOf(cfg, st0) }];
-    for (const a of log.ascends) pts.push({ t: a.t, ib: a.ib, rate: a.rate });
-    if (log.finalAscend) pts.push({ t: T, ib: log.finalAscend.ib, rate: log.finalAscend.rate });
-    else pts.push({ t: st.overflow ? st.t : T, ib: ibOf(cfg, st), rate: bankRateOf(cfg, st) });
-    return { value: value, log: log, end: st, pts: pts };
+    const pts = [{ t: st0.t, lib: lIB(cfg, st0), lrate: lRate(cfg, st0) }];
+    for (const a of log.ascends) pts.push({ t: a.t, lib: a.lib, lrate: a.lrate });
+    if (log.finalAscend) pts.push({ t: T, lib: log.finalAscend.lib, lrate: log.finalAscend.lrate });
+    else pts.push({ t: st.stopped ? st.t : T, lib: lIB(cfg, st), lrate: lRate(cfg, st) });
+    return { value: value, log: log, pts: pts, stoppedAt: st.stopped ? st.t : null };
   }
 
   function plan(cfg) {
@@ -456,22 +523,19 @@
     const budget = { left: cfg.budget || 500 };
     const res = {
       cfg: cfg,
-      now: { ib: ibOf(cfg, st0), rate: bankRateOf(cfg, st0), W: st0.Wp + st0.L, pm: cfg.R * (cfg.P + 1) },
+      now: { lib: lIB(cfg, st0), lrate: lRate(cfg, st0), pm: cfg.R * (cfg.P + 1) },
       optimal: sample(cfg, st0, T, plannerPolicy(budget)),
       baselines: []
     };
-    res.budgetLeft = budget.left;
     const noShop = Object.assign({}, cfg, { allowShop: false, allowBank: false });
-    res.baselines.push({ name: 'P* senza acquisti', run: sample(noShop, st0, T, basePolicy) });
-    for (const P of [1000, 1500, 2000, 3000]) {
-      res.baselines.push({ name: 'P' + P + ' fisso', P: P, run: sample(noShop, st0, T, fixedPolicy(P)) });
-    }
+    res.baselines.push({ name: 'pstar', run: sample(noShop, st0, T, basePolicy) });
+    for (const P of [1000, 1500, 2000, 3000]) res.baselines.push({ name: 'p' + P, P: P, run: sample(noShop, st0, T, fixedPolicy(P)) });
     return res;
   }
 
   const api = {
-    F, HOLD, defaults, bankCostTable, ibOf, bankRateOf, bankBonusOf, costToP, cumPR, pAff, pmAt, shardsAt, minPforShards,
-    pStar, growthAt, plan, INT64, initState, settleHeld, reserveOf, dOf, upgradeCost, blockSum, rhoOf
+    F, HOLD, NEG, LN10, defaults, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
+    costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.NexusModel = api;

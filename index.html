@@ -261,6 +261,17 @@ tbody tr:hover td { background: var(--sunk); }
               </select>
             </div>
             <div class="f"><label for="targetDate">Date</label><input id="targetDate" type="datetime-local"></div>
+            <div class="f"><label for="limitBits">Number limit</label>
+              <select id="limitBits">
+                <option value="none">Unlimited</option>
+                <option value="64">64-bit (9.2 Qi)</option>
+                <option value="128">128-bit</option>
+                <option value="256">256-bit</option>
+                <option value="1024">1024-bit</option>
+                <option value="2560">2560-bit (≈770 digits)</option>
+                <option value="14300">14,300-bit (≈4,300 digits)</option>
+              </select>
+            </div>
             <div class="f narrow bo2only"><label for="round">Last round</label><input class="num" id="round" type="number" min="10" max="255" step="5"></div>
             <label class="check bo2only"><input id="reinvest" type="checkbox"> Buy prestige during the run</label>
             <button id="calcBtn" type="button">Recalculate</button>
@@ -304,6 +315,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Ascend</b>: needs P ≥ 1000 and 50T in the bank; gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards. Rounding is not confirmed.</li>
                 <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5). That Resonance, Yield, Interest and Rewards add up per level is an assumption; only level 1 is confirmed.</li>
                 <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
+                <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when the bank plus everything spent on prestige passes 2^bits: 64-bit is a signed database integer, about 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
                 <li><b>Optimiser</b>: at every Ascend it tries shop purchases and target prestiges, simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
               </ul>
             </details>
@@ -343,9 +355,10 @@ tbody tr:hover td { background: var(--sunk); }
   const M = window.NexusModel;
   const $ = id => document.getElementById(id);
   const KEY = 'nexus-calculator-v2';
+  const NEG = -Infinity, LN10 = Math.LN10;
   const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
     'other', 'minGap', 'lookahead', 'round', 'rP', 'rR', 'rIB'];
-  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'paste'];
+  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'floorShards', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
   const SERIES = [
@@ -354,6 +367,7 @@ tbody tr:hover td { background: var(--sunk); }
     { name: 'Always P2000', short: 'P2000', color: 'var(--s3)' },
     { name: 'Always P1000', short: 'P1000', color: 'var(--s4)' }
   ];
+  const MAX_DAYS = 1095;
   let botIB = null;
 
   for (let L = 1; L <= 20; L++) $('bankLv').append(new Option(String(L), String(L)));
@@ -370,12 +384,12 @@ tbody tr:hover td { background: var(--sunk); }
     P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
     nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 12, lookahead: 14, round: 150,
     rP: 1000, rR: 100, rIB: 11.74,
-    bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', paste: '',
+    bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
     prime: true, boost: true, loan: true, floorShards: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
     rUseAcc: true, rReinvest: false
   };
 
-  // ---- numbers ----
+  // ---- numbers (values arrive as natural logs from the model) ----
   const SUF = { k: 1e3, m: 1e6, b: 1e9, t: 1e12, qa: 1e15, qi: 1e18, sx: 1e21, sp: 1e24 };
   function parsePts(s) {
     s = String(s || '').trim().replace(/\s/g, '').replace(/points?|pts/i, '');
@@ -386,34 +400,56 @@ tbody tr:hover td { background: var(--sunk); }
   }
   const NF = d => new Intl.NumberFormat('en-US', { maximumFractionDigits: d, minimumFractionDigits: 0 });
   const UNITS = [[1e33, 'Dc'], [1e30, 'No'], [1e27, 'Oc'], [1e24, 'Sp'], [1e21, 'Sx'], [1e18, 'Qi'], [1e15, 'Qa'], [1e12, 'T'], [1e9, 'B'], [1e6, 'M']];
-  const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
-  function sci(x) {
-    if (!isFinite(x)) return 'off the scale';
-    const e = Math.floor(Math.log10(x));
-    return NF(2).format(x / Math.pow(10, e)) + '×10' + String(e).split('').map(c => SUP[c]).join('');
+  const SUP = { '-': '⁻', '.': '·', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+  const sup = e => String(e).split('').map(c => SUP[c] || c).join('');
+  const lnOf = x => (x > 0 ? Math.log(x) : NEG);
+  // a number given by its natural log, in scientific form; past 10^(10^6) the exponent itself goes scientific
+  function sciL(l) {
+    if (l === NEG) return '0';
+    if (!isFinite(l)) return 'off the scale';
+    const d = l / LN10;
+    if (d < 1e6) {
+      let e = Math.floor(d), m = Math.pow(10, d - e);
+      if (m >= 9.995) { m = 1; e++; }
+      return NF(2).format(m) + '×10' + sup(e);
+    }
+    return '10^(' + sciL(Math.log(d)) + ')';
   }
-  function fmtPts(x) {
-    if (!isFinite(x)) return 'off the scale';
-    if (x >= 1e36) return sci(x);
+  function fmtL(l) {
+    if (l === NEG) return '0';
+    if (!isFinite(l)) return 'off the scale';
+    if (l >= Math.log(1e36)) return sciL(l);
+    const x = Math.exp(l);
     for (const [v, u] of UNITS) if (x >= v) return NF(x / v >= 100 ? 0 : 2).format(x / v) + ' ' + u;
     return NF(0).format(x);
   }
-  function fmtIB(x) {
-    if (!isFinite(x)) return 'off the scale';
-    if (x >= 1e6) return sci(x) + 'x';
+  function fmtIBL(l) {
+    if (!isFinite(l)) return 'off the scale';
+    if (l >= Math.log(1e6)) return sciL(l) + 'x';
+    const x = Math.exp(l);
     return NF(x >= 1000 ? 0 : 2).format(x) + 'x';
   }
-  function fmtInt(x) { return isFinite(x) ? (x >= 1e15 ? sci(x) : NF(0).format(Math.round(x))) : 'off the scale'; }
+  function fmtIntL(l) {
+    if (l === NEG) return '0';
+    if (!isFinite(l)) return 'off the scale';
+    return l < Math.log(1e15) ? NF(0).format(Math.round(Math.exp(l))) : sciL(l);
+  }
+  const fmtInt = x => fmtIntL(lnOf(x));
   let NOW = Date.now();
   function fmtWhen(h) {
     return new Date(NOW + h * 3600e3).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
-  const fmtDay = h => new Date(NOW + h * 3600e3).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
-  function fmtDur(h) {
+  const fmtDay = h => new Date(NOW + h * 3600e3).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: h > 24 * 300 ? 'numeric' : undefined });
+  function fmtDurL(lh) {
+    if (lh === NEG) return '0 min';
+    if (lh > Math.log(24 * 365 * 1e6)) return sciL(lh - Math.log(24 * 365)) + ' years';
+    const h = Math.exp(lh);
     if (h < 1) return Math.max(1, Math.round(h * 60)) + ' min';
     if (h < 48) return NF(h < 10 ? 1 : 0).format(h) + ' h';
-    return NF(1).format(h / 24) + ' days';
+    if (h < 24 * 365) return NF(1).format(h / 24) + ' days';
+    return NF(h / 24 / 365 < 100 ? 1 : 0).format(h / 24 / 365) + ' years';
   }
+  const fmtDur = h => fmtDurL(lnOf(h));
 
   // ---- inputs and storage ----
   function setVal(id, v) { const e = $(id); if (CHK_IDS.includes(id)) e.checked = !!v; else e.value = v; }
@@ -435,11 +471,9 @@ tbody tr:hover td { background: var(--sunk); }
   }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(getVals())); } catch (e) { /* storage unavailable */ } }
   const num = (id, d) => { const x = parseFloat($(id).value); return isFinite(x) ? x : d; };
-
   function clampRank(id) {
     const e = $(id);
-    const v = Math.round(num(id, 1));
-    const c = Math.min(100, Math.max(1, v));
+    const c = Math.min(100, Math.max(1, Math.round(num(id, 1))));
     if (String(c) !== e.value) e.value = c;
   }
 
@@ -468,6 +502,7 @@ tbody tr:hover td { background: var(--sunk); }
     c.objective = $('objective').value;
     c.round = Math.min(255, Math.max(10, Math.round(num('round', 150) / 5) * 5));
     c.reinvest = $('reinvest').checked;
+    c.limitBits = $('limitBits').value === 'none' ? Infinity : parseInt($('limitBits').value, 10);
     c.horizonH = (new Date($('targetDate').value).getTime() - NOW) / 3600e3;
     c.budget = 500;
     return c;
@@ -508,7 +543,6 @@ tbody tr:hover td { background: var(--sunk); }
   const cmd = t => el('code', null, t);
   const li = (...parts) => el('li', null, ...parts);
   function stepAt(pts, h, key) {
-    key = key || 'ib';
     let v = pts[0][key];
     for (const p of pts) { if (p.t <= h + 1e-9) v = p[key]; else break; }
     return v;
@@ -517,31 +551,31 @@ tbody tr:hover td { background: var(--sunk); }
     const out = [];
     for (const b of list) {
       const last = out[out.length - 1];
-      if (last && last.key === b.key && last.key !== 'bank' && last.level === b.from) { last.level = b.level; last.cost += b.cost; }
+      if (last && last.key === b.key && last.key !== 'bank' && Math.abs(last.lto - b.lfrom) < 1e-9) { last.lto = b.lto; last.lcost = M.lAdd(last.lcost, b.lcost); }
       else out.push(Object.assign({}, b));
     }
     return out;
   }
   function buyText(b) {
-    if (b.key === 'bank') return `Bank Lv${b.level} (${fmtPts(b.cost)})`;
-    return `${NAMES[b.key]} ${b.from}→${b.level} (${fmtInt(b.cost)} shards)`;
+    if (b.key === 'bank') return `Bank Lv${fmtIntL(b.lto)} (${fmtL(b.lcost)})`;
+    return `${NAMES[b.key]} ${fmtIntL(b.lfrom)}→${fmtIntL(b.lto)}` + (b.lcost === NEG ? '' : ` (${fmtIntL(b.lcost)} shards)`);
   }
   const buysText = list => mergeBuys(list).map(buyText).join(', ');
 
   // ---- account readout ----
   function readout(cfg) {
     const st = M.initState(cfg, 0);
-    const ib = M.ibOf(cfg, st);
-    $('roIB').textContent = fmtIB(ib);
+    const lib = M.lIB(cfg, st);
+    $('roIB').textContent = fmtIBL(lib);
     $('roPM').textContent = fmtInt((cfg.P + 1) * cfg.R) + 'x';
-    $('roBank').textContent = fmtPts(M.bankRateOf(cfg, st));
+    $('roBank').textContent = fmtL(M.lRate(cfg, st));
     const note = $('roNote');
     note.textContent = '';
-    if (botIB !== null) note.append(Math.abs(botIB - ib) < 0.015 ? 'Same Income Bonus as the bot.' : `The bot says ${NF(2).format(botIB)}x: check the fields.`);
+    if (botIB !== null) note.append(Math.abs(botIB - Math.exp(lib)) < 0.015 ? 'Same Income Bonus as the bot.' : `The bot says ${NF(2).format(botIB)}x: check the fields.`);
     else if (cfg.R < 100) note.append(`At rank 100 your Income would be ${fmtInt((cfg.P + 1) * 100)}x.`);
     $('bankDerived').textContent = '';
     $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'),
-      ' · keep at least ', el('b', null, fmtPts(M.reserveOf(cfg))), ' in the bank for full interest');
+      ' · keep at least ', el('b', null, fmtL(Math.log(M.reserveOf(cfg)))), ' in the bank for full interest');
   }
 
   // ---- planner rendering ----
@@ -549,37 +583,38 @@ tbody tr:hover td { background: var(--sunk); }
 
   function render(res) {
     const cfg = res.cfg, o = res.optimal, L = o.log, H = cfg.horizonH;
-    const limitT = Math.min(L.int64At !== undefined ? L.int64At : Infinity, L.overflowAt !== undefined ? L.overflowAt : Infinity);
-    const capped = isFinite(limitT) && limitT < H;
+    const stop = o.stoppedAt;
+    const capped = stop !== null && stop < H - 1e-6;
+    const end = capped ? stop : H;
     const final = L.final || {};
     const kp = $('kpis'); kp.textContent = '';
     const first = L.ascends[0];
     if (cfg.objective === 'bo2') {
-      kp.append(kpi('Run payout', fmtPts(final.reward), `up to round ${cfg.round}`));
-      kp.append(kpi('Enter the run with', 'Income ' + fmtInt(final.pm) + 'x', 'Income Bonus ' + fmtIB(final.ib)));
-    } else if (capped) {
-      kp.append(kpi('Income Bonus on ' + fmtDay(limitT), fmtIB(stepAt(o.pts, limitT)), 'today ' + fmtIB(res.now.ib) + ' · later: off the scale'));
-      kp.append(kpi('Bank per hour on ' + fmtDay(limitT), fmtPts(stepAt(o.pts, limitT, 'rate')), 'today ' + fmtPts(res.now.rate)));
+      kp.append(kpi('Run payout', fmtL(final.lreward), `up to round ${cfg.round}` + (capped ? ', at the limit' : '')));
+      kp.append(kpi('Enter the run with', 'Income ' + fmtIntL(final.lpm) + 'x', 'Income Bonus ' + fmtIBL(final.lib)));
     } else {
-      kp.append(kpi('Income Bonus on the date', fmtIB(final.ib), 'today ' + fmtIB(res.now.ib)));
-      kp.append(kpi('Bank per hour on the date', fmtPts(final.rate), 'today ' + fmtPts(res.now.rate)));
+      kp.append(kpi('Income Bonus on ' + fmtDay(end), fmtIBL(final.lib), 'today ' + fmtIBL(res.now.lib)));
+      kp.append(kpi('Bank per hour on ' + fmtDay(end), fmtL(final.lrate), 'today ' + fmtL(res.now.lrate)));
     }
-    kp.append(kpi('Next Ascend', first ? 'P' + fmtInt(first.P) : 'none', first ? fmtWhen(first.t) : 'not worth it before the date'));
-    const nAsc = capped ? L.ascends.filter(a => a.t <= limitT).length : L.ascends.length + (L.finalAscend ? 1 : 0);
-    kp.append(kpi('Ascends in the plan', String(nAsc), 'until ' + fmtDay(capped ? limitT : H)));
+    kp.append(kpi('Next Ascend', first ? 'P' + fmtIntL(first.lP) : 'none', first ? fmtWhen(first.t) : 'not worth it before the date'));
+    kp.append(kpi('Ascends in the plan', fmtInt(L.ascends.length + (L.finalAscend ? 1 : 0)), 'until ' + fmtDay(end)));
 
     const w = $('warnings'); w.textContent = '';
-    if (capped) {
-      w.append(el('p', { class: 'note' }, el('strong', null, 'After ' + fmtWhen(limitT) + ' the model stops being reliable. '),
-        'From there, balances and rewards pass 9.22 Qi, the largest 64-bit integer: if the bot stores points that way, it breaks. '
-        + 'Weekly and monthly rewards grow with prestige × Income Bonus and Ascends turn them into shards with the square of prestige, so taken literally the economy has no ceiling. '
-        + 'Trust the next few weeks of the plan, not the numbers at the end.'));
+    if (L.limitAt !== undefined) {
+      w.append(el('p', { class: 'note' }, el('strong', null, 'The projection stops on ' + fmtWhen(L.limitAt) + '. '),
+        `There the bank plus the points spent on prestige pass 2^${NF(0).format(cfg.limitBits)}, the number limit you picked. Set it to Unlimited to project further.`));
+    } else if (L.overflowAt !== undefined) {
+      w.append(el('p', { class: 'note' }, el('strong', null, 'The projection stops on ' + fmtWhen(L.overflowAt) + '. '),
+        'Past 10^(10^300) the numbers are beyond what the calculator can represent.'));
+    }
+    if (cfg.horizonH >= 24 * MAX_DAYS - 1) {
+      w.append(el('p', { class: 'note' }, el('strong', null, 'Projections stop after 3 years. '), 'Pick an earlier date for an exact horizon.'));
     }
     renderActions(res);
-    const series = [o.pts, res.baselines[0].run.pts, res.baselines.find(b => b.P === 2000).run.pts, res.baselines.find(b => b.P === 1000).run.pts]
-      .map((pts, i) => ({ s: SERIES[i], pts: pts }));
-    renderChart(series, capped ? limitT : H, H);
-    renderPlan(res, limitT);
+    const series = [o, res.baselines[0].run, res.baselines.find(b => b.P === 2000).run, res.baselines.find(b => b.P === 1000).run]
+      .map((r, i) => ({ s: SERIES[i], pts: r.pts }));
+    renderChart(series, end, capped);
+    renderPlan(res);
     renderCompare(res);
   }
 
@@ -587,80 +622,94 @@ tbody tr:hover td { background: var(--sunk); }
     const cfg = res.cfg, L = res.optimal.log;
     const ol = $('actions'); ol.textContent = '';
     const buys0 = L.buys.filter(b => b.t < 1e-6);
-    const disc = cfg.disc + buys0.filter(b => b.key === 'disc').reduce((a, b) => a + b.n, 0);
+    let disc = cfg.disc;
+    for (const b of buys0) if (b.key === 'disc') disc = Math.round(Math.exp(b.lto));
     const d = 1 - 0.05 * disc;
     const reserve = M.reserveOf(cfg);
     const W0 = M.cumPR(cfg.P, cfg.R, d) + cfg.bal;
-    const tgt = L.targets.length ? L.targets[0].target : Infinity;
-    const Q = M.pAff(W0 - reserve, d);
+    const tgt = L.targets.length && isFinite(L.targets[0].target) ? Math.round(Math.exp(L.targets[0].target)) : Infinity;
+    const Q = M.pAffD(W0 - reserve, d);
 
     ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), '.'));
     if (buys0.length) {
       const st = M.initState(cfg, 0);
-      for (const b of buys0) if (b.key !== 'bank') { st.S -= b.cost; st[b.key] = b.level; }
-      ol.append(li('Buy in the shard shop: ', buysText(buys0), '. Your Income Bonus drops to ', fmtIB(M.ibOf(cfg, st)), ', and the next Ascends pay it back.'));
+      for (const b of buys0) if (b.key !== 'bank') {
+        if (b.key === 'disc') st.disc = Math.round(Math.exp(b.lto)); else st[b.key] = b.lto;
+        if (b.lcost !== NEG) st.S = M.lSub(st.S, b.lcost);
+      }
+      ol.append(li('Buy in the shard shop: ', buysText(buys0), '. Your Income Bonus drops to ', fmtIBL(M.lIB(cfg, st)), ', and the next Ascends pay it back.'));
     } else if (cfg.allowShop) {
       ol.append(li('Don’t buy shard upgrades yet: none of them pays off within ' + Math.round(cfg.lookahead / 24) + ' days.'));
     }
-    const top = isFinite(tgt) ? Math.min(Q, tgt) : Q;
+    const top = Math.min(Q, tgt);
     const Pnow = top - 1;
     if (Pnow > cfg.P || (Pnow === cfg.P && cfg.R < 100)) {
       const left = W0 - M.cumPR(Pnow, 100, d);
-      ol.append(li('Buy prestige: ', cmd('/prestigeupto ' + Pnow), ' then ', cmd('/rankupmax'), `. You end at P${fmtInt(Pnow)} R100 with Income ${fmtInt(100 * top)}x (it would be ${fmtInt(Pnow + 1)}x at R1). About ${fmtPts(left)} stays in the bank: don’t go below ${fmtPts(reserve)} or interest drops.`));
+      ol.append(li('Buy prestige: ', cmd('/prestigeupto ' + Pnow), ' then ', cmd('/rankupmax'), `. You end at P${fmtInt(Pnow)} R100 with Income ${fmtInt(100 * top)}x (it would be ${fmtInt(Pnow + 1)}x at R1). About ${fmtL(lnOf(left))} stays in the bank: don’t go below ${fmtL(lnOf(reserve))} or interest drops.`));
     } else if (cfg.R < 100 && Q >= cfg.P + 1) {
       ol.append(li('Max your rank with ', cmd('/rankupmax'), `: Income goes from ${fmtInt((cfg.P + 1) * cfg.R)}x to ${fmtInt((cfg.P + 1) * 100)}x.`));
     }
     if (cfg.useRewards) {
-      const pm = 100 * Math.max(1, top);
+      const lpm = Math.log(100 * Math.max(1, top));
       const extra = cfg.prime ? [' and ', cmd('/primedaily')] : [];
-      ol.append(li('Claim ', cmd('/daily'), ...extra, ' only after raising prestige and rank: right now each is worth about ', fmtPts(1e5 * pm * res.now.ib * (1 + 0.1 * cfg.rew)),
+      ol.append(li('Claim ', cmd('/daily'), ...extra, ' only after raising prestige and rank: right now each is worth about ', fmtL(Math.log(1e5 * (1 + 0.1 * cfg.rew)) + lpm + res.now.lib),
         '. Keep weekly and monthly for right before an Ascend, when prestige is highest.'));
     }
     const a = L.ascends[0];
     if (a) {
-      const need = M.costToP(a.P, d) + cfg.minBal;
-      ol.append(li(`Next Ascend at P${fmtInt(a.P)} on ${fmtWhen(a.t)} (in ${fmtDur(a.t)}). You need ${fmtPts(need)} in total between prestige bought and bank. Order: `,
-        cmd('/claiminterest'), ', weekly and monthly if ready, ', cmd('/prestigeupto ' + (a.P - 1)), ', ', cmd('/rankupmax'), ', keep 50T in the bank, ', cmd('/prestige'), ', ', cmd('/ascend'),
+      const Pa = Math.round(Math.exp(a.lP));
+      const need = M.costToPD(Pa, d) + cfg.minBal;
+      ol.append(li(`Next Ascend at P${fmtIntL(a.lP)} on ${fmtWhen(a.t)} (in ${fmtDur(a.t)}). You need ${fmtL(lnOf(need))} in total between prestige bought and bank. Order: `,
+        cmd('/claiminterest'), ', weekly and monthly if ready, ', cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), ', keep 50T in the bank, ', cmd('/prestige'), ', ', cmd('/ascend'),
         cfg.loan ? '. Then borrow 0.9T, ' : '. ', cfg.loan ? cmd('/claiminterest') : null, cfg.loan ? ' and pay it back.' : null,
-        ` You get ${fmtInt(a.gain)} shards: Income Bonus ${fmtIB(a.ib)}.`));
+        ` You get ${fmtIntL(a.lgain)} shards: Income Bonus ${fmtIBL(a.lib)}.`));
       if (a.buys.length) ol.append(li('Right after that Ascend, buy: ', buysText(a.buys), '.'));
     } else if (cfg.objective !== 'bo2') {
       const fa = L.finalAscend;
-      ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtInt(fa.P)} (+${fmtInt(fa.gain)} shards).` : 'You can’t reach P1000 with 50T before the date: keep buying prestige.'));
+      ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtIntL(fa.lP)} (+${fmtIntL(fa.lgain)} shards).` : 'You can’t reach P1000 with 50T before the date: keep buying prestige.'));
     }
     if (cfg.objective === 'bo2' && L.final) {
-      ol.append(li(`On ${fmtWhen(cfg.horizonH)}, start the run at R100 of your highest prestige: Income ${fmtInt(L.final.pm)}x, Income Bonus ${fmtIB(L.final.ib)}. Up to round ${cfg.round} it pays about ${fmtPts(L.final.reward)}.`));
+      ol.append(li(`On ${fmtWhen(cfg.horizonH)}, start the run at R100 of your highest prestige: Income ${fmtIntL(L.final.lpm)}x, Income Bonus ${fmtIBL(L.final.lib)}. Up to round ${cfg.round} it pays about ${fmtL(L.final.lreward)}.`));
     }
   }
 
-  function renderChart(series, xEnd, H) {
+  // y is log10(IB); when that spans more than 300 decades the axis switches to log10 of the digit count
+  function renderChart(series, xEnd, capped) {
     const box = $('chartbox'); box.textContent = '';
     const lg = $('legend'); lg.textContent = '';
     for (const { s } of series) { const i = el('i'); i.style.background = s.color; lg.append(el('span', null, i, s.name)); }
-    $('chartHint').textContent = 'Log scale. ' + (xEnd < H - 1e-6 ? 'The chart stops where the model stops being reliable.' : 'Hover the chart to read values.');
-    const W = 760, Hh = 300, ml = 64, mr = 112, mt = 12, mb = 30, pw = W - ml - mr, ph = Hh - mt - mb;
-    let ymin = Infinity, ymax = -Infinity;
-    for (const { pts } of series) for (const p of pts) if (p.t <= xEnd + 1e-9 && isFinite(p.ib)) { ymin = Math.min(ymin, p.ib); ymax = Math.max(ymax, p.ib); }
-    const l0 = Math.floor(Math.log10(ymin)), l1 = Math.max(l0 + 1, Math.ceil(Math.log10(ymax)));
+    let dmin = Infinity, dmax = -Infinity;
+    for (const { pts } of series) for (const p of pts) if (p.t <= xEnd + 1e-9 && isFinite(p.lib)) { dmin = Math.min(dmin, p.lib / LN10); dmax = Math.max(dmax, p.lib / LN10); }
+    const digits = dmax - dmin > 300;
+    $('chartHint').textContent = (digits ? 'Double log scale: each step multiplies the number of digits by 10. ' : 'Log scale. ')
+      + (capped ? 'The chart stops where the projection stops.' : 'Hover the chart to read values.');
+    const yOf = lib => digits ? Math.log10(Math.max(1e-3, lib / LN10)) : lib / LN10;
+    const W = 760, Hh = 300, ml = 76, mr = 118, mt = 12, mb = 30, pw = W - ml - mr, ph = Hh - mt - mb;
+    const ylo = Math.floor(yOf(dmin * LN10)), yhi = Math.max(ylo + 1, Math.ceil(yOf(dmax * LN10)));
     const X = t => ml + pw * t / xEnd;
-    const Y = v => mt + ph * (1 - (Math.log10(v) - l0) / (l1 - l0));
+    const Y = lib => mt + ph * (1 - (yOf(lib) - ylo) / (yhi - ylo));
     const NS = 'http://www.w3.org/2000/svg';
     const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
     const svg = mk('svg', { viewBox: `0 0 ${W} ${Hh}`, class: 'chart', role: 'img', 'aria-label': 'Income Bonus over time for four strategies' });
-    const span = l1 - l0, stepDec = span <= 6 ? 1 : Math.ceil(span / 6);
+    const span = yhi - ylo, step = span <= 6 ? 1 : Math.ceil(span / 6);
     const ticks = [];
-    for (let e = l0; e <= l1; e += stepDec) { ticks.push(Math.pow(10, e)); if (span <= 2 && e < l1) ticks.push(2 * Math.pow(10, e), 5 * Math.pow(10, e)); }
-    for (const v of ticks) {
-      const y = Y(v);
-      if (y < mt - 1 || y > mt + ph + 1) continue;
-      svg.append(mk('line', { x1: ml, x2: ml + pw, y1: y, y2: y, stroke: 'var(--grid)', 'stroke-width': 1 }));
-      const t = mk('text', { x: ml - 8, y: y + 4, 'text-anchor': 'end' }); t.textContent = fmtIB(v); svg.append(t);
+    for (let y = ylo; y <= yhi; y += step) {
+      ticks.push(y);
+      if (!digits && span <= 2 && y < yhi) ticks.push(y + Math.log10(2), y + Math.log10(5));
+    }
+    for (const y of ticks) {
+      const lib = digits ? Math.pow(10, y) * LN10 : y * LN10;
+      const py = Y(lib);
+      if (py < mt - 1 || py > mt + ph + 1) continue;
+      svg.append(mk('line', { x1: ml, x2: ml + pw, y1: py, y2: py, stroke: 'var(--grid)', 'stroke-width': 1 }));
+      const t = mk('text', { x: ml - 8, y: py + 4, 'text-anchor': 'end' }); t.textContent = fmtIBL(lib); svg.append(t);
     }
     svg.append(mk('line', { x1: ml, x2: ml + pw, y1: mt + ph, y2: mt + ph, stroke: 'var(--axis)', 'stroke-width': 1 }));
-    const days = xEnd / 24, dstep = days <= 10 ? 1 : days <= 30 ? 5 : days <= 70 ? 10 : 20;
+    const days = xEnd / 24;
+    const dstep = days <= 10 ? 1 : days <= 30 ? 5 : days <= 70 ? 10 : days <= 200 ? 30 : days <= 500 ? 90 : 180;
     for (let dd = 0; dd <= days + 1e-9; dd += dstep) {
       const t = mk('text', { x: X(dd * 24), y: mt + ph + 18, 'text-anchor': dd === 0 ? 'start' : 'middle' });
-      t.textContent = new Date(NOW + dd * 86400e3).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      t.textContent = fmtDay(dd * 24);
       svg.append(t);
     }
     const labels = [];
@@ -668,13 +717,13 @@ tbody tr:hover td { background: var(--sunk); }
       const { s, pts } = series[i];
       let d = '', prev = null;
       for (const p of pts) {
-        if (p.t > xEnd + 1e-9 || !isFinite(p.ib)) break;
-        d += prev === null ? `M${X(p.t).toFixed(1)},${Y(p.ib).toFixed(1)}` : `H${X(p.t).toFixed(1)}V${Y(p.ib).toFixed(1)}`;
+        if (p.t > xEnd + 1e-9 || !isFinite(p.lib)) break;
+        d += prev === null ? `M${X(p.t).toFixed(1)},${Y(p.lib).toFixed(1)}` : `H${X(p.t).toFixed(1)}V${Y(p.lib).toFixed(1)}`;
         prev = p;
       }
       if (prev) d += `H${X(xEnd).toFixed(1)}`;
       svg.append(mk('path', { d: d, fill: 'none', stroke: s.color, 'stroke-width': i === 0 ? 2.5 : 2, 'stroke-linejoin': 'round' }));
-      if (prev) labels.push({ y: Y(prev.ib), text: s.short + ' ' + fmtIB(prev.ib) });
+      if (prev) labels.push({ y: Y(prev.lib), text: s.short + ' ' + fmtIBL(prev.lib) });
     }
     labels.sort((a, b) => a.y - b.y);
     for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
@@ -698,11 +747,11 @@ tbody tr:hover td { background: var(--sunk); }
       tip.append(el('div', { class: 't' }, fmtWhen(t)));
       for (const { s, pts } of series) {
         const i = el('i'); i.style.background = s.color;
-        tip.append(el('div', { class: 'r' }, el('span', null, i, s.name), el('b', null, fmtIB(stepAt(pts, t)))));
+        tip.append(el('div', { class: 'r' }, el('span', null, i, s.name), el('b', null, fmtIBL(stepAt(pts, t, 'lib')))));
       }
       tip.hidden = false;
       const px = x * r.width / W;
-      tip.style.left = Math.max(0, px + 190 > r.width ? px - 190 : px + 12) + 'px';
+      tip.style.left = Math.max(0, px + 210 > r.width ? px - 210 : px + 12) + 'px';
       tip.style.top = '8px';
     }
     const hide = () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); };
@@ -712,7 +761,7 @@ tbody tr:hover td { background: var(--sunk); }
     hit.addEventListener('blur', hide);
   }
 
-  function renderPlan(res, limitT) {
+  function renderPlan(res) {
     const L = res.optimal.log, cfg = res.cfg;
     const tb = $('planTable'); tb.textContent = '';
     tb.append(el('thead', null, el('tr', null, el('th', null, '#'), el('th', null, 'When'), el('th', null, 'Ascend at'), el('th', { class: 'r' }, 'Shards'),
@@ -721,41 +770,41 @@ tbody tr:hover td { background: var(--sunk); }
     const rows = L.ascends.map((a, i) => ({ a: a, i: i }));
     if (L.finalAscend) rows.push({ a: Object.assign({ buys: [] }, L.finalAscend, { t: cfg.horizonH }), i: L.ascends.length, final: true });
     if (!rows.length) body.append(el('tr', null, el('td', { colspan: 7 }, 'No Ascend before the date.')));
-    let shownOver = 0;
-    const hidden = rows.filter(r => r.a.t > limitT).length - 1;
-    for (const { a, i, final } of rows) {
-      const over = a.t > limitT;
-      if (over && shownOver++ >= 1) continue;
+    const HEAD = 40, TAIL = 8;
+    rows.forEach(({ a, i, final }, idx) => {
+      if (rows.length > HEAD + TAIL + 1 && idx >= HEAD && idx < rows.length - TAIL) {
+        if (idx === HEAD) body.append(el('tr', { class: 'over' }, el('td', { colspan: 7 }, `${NF(0).format(rows.length - HEAD - TAIL)} more Ascends, same pattern.`)));
+        return;
+      }
       const notes = el('td');
       const rw = L.rewards.filter(r => Math.abs(r.t - a.t) < 1e-6 && (r.kind === 'weekly' || r.kind === 'monthly')).map(r => r.kind);
       if (rw.length) notes.append('claim ' + rw.join(' + ') + ' first. ');
       if (a.buys && a.buys.length) notes.append('then buy ' + buysText(a.buys) + '. ');
       if (final) notes.append('on the goal date. ');
-      if (over) notes.append(el('span', { class: 'chip' }, 'past the limit'));
-      body.append(el('tr', over ? { class: 'over' } : null,
-        el('td', { class: 'n' }, String(i + 1)), el('td', { class: 'n' }, fmtWhen(a.t)), el('td', { class: 'n' }, 'P' + fmtInt(a.P)),
-        el('td', { class: 'n r' }, '+' + fmtInt(a.gain)), el('td', { class: 'n r' }, fmtIB(a.ib)), el('td', { class: 'n r' }, fmtPts(a.rate)), notes));
-    }
-    if (hidden > 0) body.append(el('tr', { class: 'over' }, el('td', { colspan: 7 }, `${hidden} more Ascends past the model’s limit are not shown.`)));
+      body.append(el('tr', null,
+        el('td', { class: 'n' }, NF(0).format(i + 1)), el('td', { class: 'n' }, fmtWhen(a.t)), el('td', { class: 'n' }, 'P' + fmtIntL(a.lP)),
+        el('td', { class: 'n r' }, '+' + fmtIntL(a.lgain)), el('td', { class: 'n r' }, fmtIBL(a.lib)), el('td', { class: 'n r' }, fmtL(a.lrate)), notes));
+    });
     tb.append(body);
   }
 
   function renderCompare(res) {
     const bo2 = res.cfg.objective === 'bo2';
     const tb = $('cmpTable'); tb.textContent = '';
-    tb.append(el('thead', null, el('tr', null, el('th', null, 'Strategy'), el('th', { class: 'r' }, bo2 ? 'Run payout' : 'IB on the date'),
-      el('th', { class: 'r' }, bo2 ? 'IB on the date' : 'Bank/hr on the date'), el('th', { class: 'r' }, 'Ascends'), el('th', { class: 'r' }, 'Upgrades bought'))));
+    tb.append(el('thead', null, el('tr', null, el('th', null, 'Strategy'), el('th', { class: 'r' }, bo2 ? 'Run payout' : 'IB at the end'),
+      el('th', { class: 'r' }, bo2 ? 'IB at the end' : 'Bank/hr at the end'), el('th', { class: 'r' }, 'Ascends'), el('th', null, 'Ends'))));
     const body = el('tbody');
     const names = ['P* without upgrades', 'Always P1000', 'Always P1500', 'Always P2000', 'Always P3000'];
     const rows = [{ name: 'Recommended plan', run: res.optimal, best: true }].concat(res.baselines.map((b, i) => ({ name: names[i], run: b.run })));
     for (const r of rows) {
       const f = r.run.log.final || {};
+      const ends = r.run.stoppedAt !== null && r.run.stoppedAt < res.cfg.horizonH - 1e-6 ? 'at the limit, ' + fmtDay(r.run.stoppedAt) : 'on the date';
       body.append(el('tr', null,
         el('td', null, r.name, r.best ? ' ' : null, r.best ? el('span', { class: 'chip best' }, 'recommended') : null),
-        el('td', { class: 'n r' }, bo2 ? fmtPts(f.reward) : fmtIB(f.ib)),
-        el('td', { class: 'n r' }, bo2 ? fmtIB(f.ib) : fmtPts(f.rate)),
-        el('td', { class: 'n r' }, String(r.run.log.ascends.length + (r.run.log.finalAscend ? 1 : 0))),
-        el('td', { class: 'n r' }, String(mergeBuys(r.run.log.buys).length))));
+        el('td', { class: 'n r' }, bo2 ? fmtL(f.lreward) : fmtIBL(f.lib)),
+        el('td', { class: 'n r' }, bo2 ? fmtIBL(f.lib) : fmtL(f.lrate)),
+        el('td', { class: 'n r' }, fmtInt(r.run.log.ascends.length + (r.run.log.finalAscend ? 1 : 0))),
+        el('td', null, ends)));
     }
     tb.append(body);
   }
@@ -765,40 +814,40 @@ tbody tr:hover td { background: var(--sunk); }
     const useAcc = $('rUseAcc').checked;
     for (const id of ['rP', 'rR', 'rIB']) $(id).disabled = useAcc;
     const st = M.initState(cfg, 0);
-    if (useAcc) { $('rP').value = cfg.P; $('rR').value = cfg.R; $('rIB').value = Math.round(M.ibOf(cfg, st) * 100) / 100; }
+    if (useAcc) { $('rP').value = cfg.P; $('rR').value = cfg.R; $('rIB').value = Math.round(Math.exp(M.lIB(cfg, st)) * 100) / 100; }
     const P = Math.max(0, Math.round(num('rP', 0)));
     const R = Math.min(100, Math.max(1, Math.round(num('rR', 1))));
-    const ib = Math.max(0, num('rIB', 1));
-    const pm0 = (P + 1) * R;
-    const bankRate = M.bankRateOf(cfg, st);
+    const lib = lnOf(Math.max(0, num('rIB', 1)));
+    const lpm0 = Math.log((P + 1) * R);
+    const lrate = M.lRate(cfg, st);
     const reinvest = $('rReinvest').checked;
-    const d = M.dOf(st), reserve = M.reserveOf(cfg);
-    let W = M.cumPR(P, R, d) + (useAcc ? cfg.bal : reserve);
-    let pm = pm0, tot = 0;
+    const d = M.dOf(st), lres = M.lReserve(cfg);
+    let lW = lnOf(M.cumPR(P, R, d) + (useAcc ? cfg.bal : M.reserveOf(cfg)));
+    let lpm = lpm0, tot = NEG;
     const rows = [];
     for (let r = 10; r <= 255; r += 5) {
-      const rew = 1500 * pm * ib * Math.pow(1.4, r / 5 - 1);
-      tot += rew;
-      rows.push({ r: r, pm: pm, rew: rew, tot: tot });
-      if (reinvest) { W += rew; pm = Math.max(pm, M.pmAt(W - reserve, d)); }
+      const lrew = Math.log(1500) + lpm + lib + (r / 5 - 1) * Math.log(1.4);
+      tot = M.lAdd(tot, lrew);
+      rows.push({ r: r, lpm: lpm, lrew: lrew, ltot: tot });
+      if (reinvest) { lW = M.lAdd(lW, lrew); lpm = Math.max(lpm, M.lPm(M.lSub(lW, lres), d)); }
     }
-    $('rDerived').textContent = '';
-    $('rDerived').append('Income ', el('b', null, fmtInt(pm0) + 'x'), ' = (prestige + 1) × rank',
-      R < 100 ? ['. At rank 100 it would be ', el('b', null, fmtInt((P + 1) * 100) + 'x')].reduce((f, x) => (f.append(x), f), document.createDocumentFragment()) : '',
-      '. Your bank makes ', el('b', null, fmtPts(bankRate) + '/hr'), '.');
+    const der = $('rDerived'); der.textContent = '';
+    der.append('Income ', el('b', null, fmtInt((P + 1) * R) + 'x'), ' = (prestige + 1) × rank');
+    if (R < 100) der.append('. At rank 100 it would be ', el('b', null, fmtInt((P + 1) * 100) + 'x'));
+    der.append('. Your bank makes ', el('b', null, fmtL(lrate) + '/hr'), '.');
     const k = $('rKpis'); k.textContent = '';
     for (const r of [100, 150, 200, 255]) {
       const row = rows.find(x => x.r === r);
-      k.append(kpi('Total at round ' + r, fmtPts(row.tot), '= ' + fmtDur(row.tot / bankRate) + ' of bank'));
+      k.append(kpi('Total at round ' + r, fmtL(row.ltot), '= ' + fmtDurL(row.ltot - lrate) + ' of bank'));
     }
     const tb = $('roundTable'); tb.textContent = '';
-    const head = [el('th', null, 'Round'), el('th', { class: 'r' }, 'Block reward'), el('th', { class: 'r' }, 'Total earned'), el('th', { class: 'r' }, 'Hours of bank')];
+    const head = [el('th', null, 'Round'), el('th', { class: 'r' }, 'Block reward'), el('th', { class: 'r' }, 'Total earned'), el('th', { class: 'r' }, 'Bank time')];
     if (reinvest) head.splice(1, 0, el('th', { class: 'r' }, 'Income'));
     tb.append(el('thead', null, el('tr', null, ...head)));
     const body = el('tbody');
     for (const x of rows) {
-      const cells = [el('td', { class: 'n' }, String(x.r)), el('td', { class: 'n r' }, fmtPts(x.rew)), el('td', { class: 'n r' }, fmtPts(x.tot)), el('td', { class: 'n r' }, NF(x.tot / bankRate < 10 ? 1 : 0).format(x.tot / bankRate))];
-      if (reinvest) cells.splice(1, 0, el('td', { class: 'n r' }, fmtInt(x.pm) + 'x'));
+      const cells = [el('td', { class: 'n' }, String(x.r)), el('td', { class: 'n r' }, fmtL(x.lrew)), el('td', { class: 'n r' }, fmtL(x.ltot)), el('td', { class: 'n r' }, fmtDurL(x.ltot - lrate))];
+      if (reinvest) cells.splice(1, 0, el('td', { class: 'n r' }, fmtIntL(x.lpm) + 'x'));
       body.append(el('tr', x.r % 50 === 0 ? { class: 'mile' } : null, ...cells));
     }
     tb.append(body);
@@ -826,7 +875,7 @@ tbody tr:hover td { background: var(--sunk); }
       $('out').classList.remove('busy');
       if (e.data.error) showError(e.data.error); else render(e.data.res);
     };
-    worker.onerror = () => { worker = null; };
+    worker.onerror = () => { worker = null; run(); };
   } catch (e) { worker = null; }
 
   function showError(msg) {
@@ -851,11 +900,12 @@ tbody tr:hover td { background: var(--sunk); }
       $('warnings').append(el('p', { class: 'note' }, el('strong', null, 'Pick a future date. '), 'The goal has to be at least a few hours away.'));
       return;
     }
-    cfg.horizonH = Math.min(cfg.horizonH, 24 * 180);
+    cfg.horizonH = Math.min(cfg.horizonH, 24 * MAX_DAYS);
     $('out').classList.add('busy');
     const id = ++jobId;
     if (worker) { worker.postMessage({ id: id, cfg: cfg }); return; }
     setTimeout(() => {
+      if (id !== jobId) return;
       try { render(M.plan(cfg)); } catch (e) { showError(e.message); }
       $('out').classList.remove('busy');
     }, 20);
