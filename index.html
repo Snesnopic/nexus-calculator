@@ -1,165 +1,885 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Calculator</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* custom scrollbar for dark modern feel */
-        ::-webkit-scrollbar {
-            width: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #111827; 
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #374151; 
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #4b5563; 
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Ascend planner and Zombies round reward calculator for the Nexus Network bot.">
+<title>Nexus Calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* layout: account inputs on the left rail, tabbed tools (planner, round rewards) on the right; one column under 1000px */
+:root {
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --sunk: #eceef2;
+  --tint: #e9f1fb;
+  --ink: #15171c;
+  --ink-2: #474e5c;
+  --muted: #747b89;
+  --line: #dcdfe5;
+  --accent: #2a78d6;
+  --accent-ink: #1c5cab;
+  --on-accent: #ffffff;
+  --warn: #9a5b00;
+  --warn-bg: #fdf3df;
+  --good: #006300;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --f-display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --surface: #171a20; --sunk: #1d2129; --tint: #16233a;
+    --ink: #f1f3f6; --ink-2: #c0c6d0; --muted: #8b93a1; --line: #2a2f39;
+    --accent: #3987e5; --accent-ink: #86b6ef; --on-accent: #ffffff; --warn: #f0b44c; --warn-bg: #2e2412; --good: #0ca30c;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+    --grid: #2c2c2a; --axis: #383835;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --surface: #171a20; --sunk: #1d2129; --tint: #16233a;
+  --ink: #f1f3f6; --ink-2: #c0c6d0; --muted: #8b93a1; --line: #2a2f39;
+  --accent: #3987e5; --accent-ink: #86b6ef; --on-accent: #ffffff; --warn: #f0b44c; --warn-bg: #2e2412; --good: #0ca30c;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
+  --grid: #2c2c2a; --axis: #383835;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1320px; margin: 0 auto; padding-inline: 16px; padding-block: 20px 48px; }
+header.top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 16px; }
+h1 { font-family: var(--f-display); font-weight: 600; font-size: 1.6rem; letter-spacing: 0.02em; margin: 0; text-wrap: balance; }
+.sub { color: var(--ink-2); margin: 0; max-width: 70ch; }
+h2 { font-family: var(--f-display); font-weight: 600; font-size: 1.05rem; letter-spacing: 0.03em; margin: 0; text-wrap: balance; }
+.layout { display: grid; gap: 16px; grid-template-columns: 1fr; }
+@media (min-width: 1000px) { .layout { grid-template-columns: minmax(330px, 400px) minmax(0, 1fr); align-items: start; } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; min-width: 0; }
+.rail { display: flex; flex-direction: column; gap: 14px; }
+.results { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+legend { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); padding: 0; margin-bottom: 6px; }
+.fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 10px; }
+.fields.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.f { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.f label, .lbl { font-size: 0.78rem; color: var(--ink-2); }
+input[type="text"], input[type="number"], input[type="datetime-local"], select, textarea {
+  font: inherit; color: var(--ink); background: var(--sunk); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; min-width: 0;
+}
+input:disabled { color: var(--muted); }
+input.num, select.num { font-family: var(--f-mono); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+input.bad { border-color: var(--warn); }
+textarea { font-family: var(--f-mono); font-size: 0.78rem; min-height: 92px; resize: vertical; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--ink); }
+.check input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
+button { font: inherit; font-weight: 600; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); padding: 7px 14px; cursor: pointer; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.hint { font-size: 0.78rem; color: var(--muted); margin: 0; }
+.msg { font-size: 0.8rem; color: var(--ink-2); margin: 0; }
+.msg.ok { color: var(--good); }
+.msg.bad { color: var(--warn); }
+.readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; background: var(--sunk); border-radius: 6px; padding: 8px 10px; }
+.readout div { display: flex; flex-direction: column; min-width: 0; }
+.readout span { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.readout b { font-family: var(--f-mono); font-weight: 500; font-size: 0.92rem; overflow-wrap: anywhere; }
+.derived { font-size: 0.78rem; color: var(--ink-2); }
+.derived b { font-family: var(--f-mono); font-weight: 500; color: var(--ink); }
+details.panel > summary { cursor: pointer; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+details.panel[open] > summary { margin-bottom: 10px; }
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+.tab { background: transparent; color: var(--ink-2); border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; font-family: var(--f-display); font-size: 0.98rem; letter-spacing: 0.03em; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.objbar { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; }
+.objbar .f { min-width: 150px; flex: 1 1 150px; }
+.objbar .f.narrow { flex: 0 1 110px; min-width: 90px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kpi .k { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.kpi .v { font-family: var(--f-mono); font-size: 1.25rem; font-weight: 500; overflow-wrap: anywhere; }
+.kpi .d { font-size: 0.8rem; color: var(--ink-2); }
+.now { background: var(--tint); border-color: color-mix(in srgb, var(--accent) 35%, var(--line)); }
+.now ol { margin: 10px 0 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 8px; max-width: 80ch; }
+.now li::marker { font-family: var(--f-mono); color: var(--accent-ink); }
+code { font-family: var(--f-mono); font-size: 0.84em; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; white-space: nowrap; }
+.note { border-left: 3px solid var(--warn); background: var(--warn-bg); color: var(--ink); padding: 10px 12px; border-radius: 0 6px 6px 0; font-size: 0.86rem; max-width: 90ch; margin: 0; }
+.note strong { color: var(--warn); }
+.chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; align-items: baseline; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.8rem; color: var(--ink-2); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 16px; height: 2px; border-radius: 1px; display: inline-block; }
+.chartbox { position: relative; margin-top: 8px; }
+svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+svg.chart text { font-family: var(--f-mono); font-size: 11px; fill: var(--muted); }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 0.78rem; box-shadow: 0 4px 16px rgba(0,0,0,0.12); min-width: 170px; z-index: 2; }
+.tip .t { color: var(--muted); margin-bottom: 4px; }
+.tip .r { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+.tip .r b { font-family: var(--f-mono); font-weight: 500; color: var(--ink); }
+.tip .r span { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.tip .r i { width: 12px; height: 2px; display: inline-block; }
+.tablebox { overflow-x: auto; margin-top: 8px; }
+.tablebox.tall { max-height: 460px; overflow-y: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 6px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--surface); }
+th.r, td.r { text-align: right; }
+td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.n { font-family: var(--f-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.over td { color: var(--muted); }
+tr.mile td { background: var(--tint); }
+tbody tr:hover td { background: var(--sunk); }
+.chip { display: inline-block; font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; padding: 0 6px; border-radius: 99px; background: var(--warn-bg); color: var(--warn); white-space: nowrap; }
+.chip.best { background: var(--tint); color: var(--accent-ink); }
+.formulas summary { cursor: pointer; font-family: var(--f-display); font-weight: 600; font-size: 1.05rem; letter-spacing: 0.03em; }
+.formulas ul { margin: 10px 0 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; max-width: 90ch; font-size: 0.86rem; }
+.busy { opacity: 0.55; transition: opacity 0.15s; }
+@media (prefers-reduced-motion: reduce) { .busy { transition: none; } }
+@media (max-width: 420px) { .fields.three { grid-template-columns: repeat(2, minmax(0, 1fr)); } .checks { grid-template-columns: 1fr; } .readout { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+</style>
+
 </head>
-<body class="bg-gray-900 text-gray-100 min-h-screen font-sans antialiased p-4 md:p-8">
-    <main class="max-w-4xl mx-auto space-y-8">
-        
-        <!-- header section -->
-        <header class="text-center space-y-2">
-            <h1 class="text-3xl md:text-4xl font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-cyan-500">
-                Calculator
-            </h1>
-            <p class="text-gray-400 text-sm"></p>
-        </header>
+<body>
+<div class="wrap">
+  <header class="top">
+    <h1>Nexus Calculator</h1>
+    <p class="sub">Plan your Ascends and check what a Zombies run pays out, for the Nexus Network bot.</p>
+  </header>
 
-        <!-- input configuration card -->
-        <section class="bg-gray-800 rounded-xl p-6 shadow-lg border border-gray-700">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                
-                <div class="space-y-2">
-                    <label for="prestige" class="block text-sm font-medium text-gray-300">Prestige</label>
-                    <input type="number" id="prestige" value="1" min="0" 
-                           class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all placeholder-gray-500" 
-                           placeholder="enter prestige">
-                </div>
+  <div class="layout">
+    <aside class="rail">
+      <div class="panel">
+        <fieldset>
+          <legend>Your account</legend>
+          <div class="fields">
+            <div class="f"><label for="P">Prestige</label><input class="num" id="P" type="number" min="0" step="1"></div>
+            <div class="f"><label for="R">Rank (1–100)</label><input class="num" id="R" type="number" min="1" max="100" step="1"></div>
+            <div class="f"><label for="bal">Bank balance</label><input class="num" id="bal" type="text" inputmode="decimal" placeholder="e.g. 6.6T"></div>
+            <div class="f"><label for="shards">Unspent shards</label><input class="num" id="shards" type="number" min="0" step="1"></div>
+          </div>
+          <div class="checks">
+            <label class="check"><input id="prime" type="checkbox"> Prime</label>
+            <label class="check"><input id="boost" type="checkbox"> Server booster (+1x)</label>
+          </div>
+          <div class="readout" aria-live="polite">
+            <div><span>Income Bonus</span><b id="roIB">–</b></div>
+            <div><span>Income</span><b id="roPM">–</b></div>
+            <div><span>Bank per hour</span><b id="roBank">–</b></div>
+          </div>
+          <p class="hint" id="roNote"></p>
+        </fieldset>
+      </div>
 
-                <div class="space-y-2">
-                    <label for="rank" class="block text-sm font-medium text-gray-300">Rank</label>
-                    <input type="number" id="rank" value="10" min="1" 
-                           class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all placeholder-gray-500" 
-                           placeholder="enter rank">
-                </div>
+      <div class="panel">
+        <fieldset>
+          <legend>Shard upgrades (levels)</legend>
+          <div class="fields three">
+            <div class="f"><label for="res">Resonance</label><input class="num" id="res" type="number" min="0" step="1"></div>
+            <div class="f"><label for="yld">Yield</label><input class="num" id="yld" type="number" min="0" step="1"></div>
+            <div class="f"><label for="intr">Interest</label><input class="num" id="intr" type="number" min="0" step="1"></div>
+            <div class="f"><label for="rew">Rewards</label><input class="num" id="rew" type="number" min="0" step="1"></div>
+            <div class="f"><label for="disc">Discount</label>
+              <select class="num" id="disc"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></div>
+          </div>
+        </fieldset>
+      </div>
 
-                <div class="space-y-2">
-                    <label for="incomeBonus" class="block text-sm font-medium text-gray-300">Income Bonus</label>
-                    <input type="number" id="incomeBonus" value="1.0" min="0" step="0.1" 
-                           class="w-full bg-gray-900 border border-gray-600 rounded-lg px-4 py-2.5 text-gray-100 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all placeholder-gray-500" 
-                           placeholder="multiplier (e.g. 1.5)">
-                </div>
+      <div class="panel">
+        <fieldset>
+          <legend>Bank</legend>
+          <div class="fields">
+            <div class="f"><label for="bankLv">Bank level</label><select class="num" id="bankLv"></select></div>
+            <div class="f"><label for="artifact">Artifact interest (%/hr)</label><input class="num" id="artifact" type="number" min="0" step="0.25"></div>
+          </div>
+          <p class="derived" id="bankDerived"></p>
+        </fieldset>
+      </div>
 
+      <div class="panel">
+        <fieldset>
+          <legend>Hours until the next reward</legend>
+          <div class="fields">
+            <div class="f"><label for="nDaily">/daily</label><input class="num" id="nDaily" type="number" min="0" step="1"></div>
+            <div class="f"><label for="nPrime">/primedaily</label><input class="num" id="nPrime" type="number" min="0" step="1"></div>
+            <div class="f"><label for="nWeekly">/weekly</label><input class="num" id="nWeekly" type="number" min="0" step="1"></div>
+            <div class="f"><label for="nMonthly">/monthly</label><input class="num" id="nMonthly" type="number" min="0" step="1"></div>
+          </div>
+          <p class="hint">0 means available now. Cooldowns restart from your last claim.</p>
+        </fieldset>
+      </div>
+
+      <details class="panel">
+        <summary>Import from bot messages</summary>
+        <fieldset>
+          <label class="lbl" for="paste">Paste the output of <code>/stats</code>, <code>/bank</code> and <code>/shards</code>, together or one at a time.</label>
+          <textarea id="paste" placeholder="DovahkiinNR — Stats&#10;Income Bonus&#10;11.74x on all income…"></textarea>
+          <div class="row"><button id="parseBtn" type="button">Fill the fields</button><p id="parseMsg" class="msg"></p></div>
+        </fieldset>
+      </details>
+
+      <details class="panel">
+        <summary>Advanced</summary>
+        <fieldset>
+          <div class="fields">
+            <div class="f"><label for="other">Other IB bonuses (+x)</label><input class="num" id="other" type="number" min="0" step="0.1"></div>
+            <div class="f"><label for="rawCap">Hourly raw cap</label><input class="num" id="rawCap" type="text" inputmode="decimal"></div>
+            <div class="f"><label for="minGap">Min hours between Ascends</label><input class="num" id="minGap" type="number" min="1" step="1"></div>
+            <div class="f"><label for="lookahead">Judge choices over (days)</label><input class="num" id="lookahead" type="number" min="3" max="60" step="1"></div>
+          </div>
+          <div class="checks">
+            <label class="check"><input id="loan" type="checkbox"> 0.9T loan after Ascend</label>
+            <label class="check"><input id="floorShards" type="checkbox"> Shards round down</label>
+            <label class="check"><input id="allowShop" type="checkbox"> Consider shard upgrades</label>
+            <label class="check"><input id="allowBank" type="checkbox"> Consider bank levels</label>
+            <label class="check"><input id="useRewards" type="checkbox"> Count daily, weekly, monthly</label>
+          </div>
+        </fieldset>
+      </details>
+    </aside>
+
+    <main class="results">
+      <div class="tabs" role="tablist" aria-label="Tools">
+        <button class="tab" id="tab-planner" role="tab" aria-controls="planner" aria-selected="true" type="button">Ascend planner</button>
+        <button class="tab" id="tab-rounds" role="tab" aria-controls="rounds" aria-selected="false" type="button">Round rewards</button>
+      </div>
+
+      <section id="planner" role="tabpanel" aria-labelledby="tab-planner" class="results">
+        <div class="panel">
+          <div class="objbar">
+            <div class="f"><label for="objective">Goal</label>
+              <select id="objective">
+                <option value="ib">Highest Income Bonus by the date</option>
+                <option value="income">Highest bank income by the date</option>
+                <option value="bo2">Biggest Zombies run on the date</option>
+              </select>
             </div>
-            
-            <button onclick="calculate()" 
-                    class="w-full bg-gradient-to-r from-emerald-500 to-cyan-600 hover:from-emerald-400 hover:to-cyan-500 text-white font-bold py-3 px-6 rounded-lg shadow-lg hover:shadow-cyan-500/25 transition-all duration-200 uppercase tracking-wider text-sm">
-                Calculate
-            </button>
-        </section>
+            <div class="f"><label for="targetDate">Date</label><input id="targetDate" type="datetime-local"></div>
+            <div class="f narrow bo2only"><label for="round">Last round</label><input class="num" id="round" type="number" min="10" max="255" step="5"></div>
+            <label class="check bo2only"><input id="reinvest" type="checkbox"> Buy prestige during the run</label>
+            <button id="calcBtn" type="button">Recalculate</button>
+          </div>
+        </div>
 
-        <!-- results section -->
-        <section class="bg-gray-800 rounded-xl shadow-lg border border-gray-700 overflow-hidden hidden" id="resultsSection">
-            <div class="overflow-x-auto max-h-[600px]">
-                <table class="w-full text-left border-collapse">
-                    <thead class="sticky top-0 bg-gray-900/95 backdrop-blur shadow-sm z-10">
-                        <tr>
-                            <th class="p-4 font-semibold text-gray-300 border-b border-gray-700 w-24">Round</th>
-                            <th class="p-4 font-semibold text-gray-300 border-b border-gray-700 text-right">Round Reward</th>
-                            <th class="p-4 font-semibold text-gray-300 border-b border-gray-700 text-right">Total Earned</th>
-                        </tr>
-                    </thead>
-                    <tbody id="resultsBody" class="divide-y divide-gray-750">
-                        <!-- rows injected via js -->
-                    </tbody>
-                </table>
+        <div id="out" class="results">
+          <div class="kpis" id="kpis"></div>
+          <div id="warnings"></div>
+          <section class="panel now">
+            <h2>What to do now</h2>
+            <ol id="actions"></ol>
+          </section>
+          <section class="panel">
+            <div class="chart-head">
+              <h2>Income Bonus over time</h2>
+              <div class="legend" id="legend"></div>
             </div>
-        </section>
+            <p class="hint" id="chartHint"></p>
+            <div class="chartbox" id="chartbox"></div>
+          </section>
+          <section class="panel">
+            <h2>Ascend plan</h2>
+            <p class="hint">After each Ascend, update your account and the plan recalculates.</p>
+            <div class="tablebox tall"><table id="planTable"></table></div>
+          </section>
+          <section class="panel">
+            <h2>Strategies compared</h2>
+            <div class="tablebox"><table id="cmpTable"></table></div>
+          </section>
+          <section class="panel formulas">
+            <details>
+              <summary>Formulas and assumptions</summary>
+              <ul>
+                <li><b>Income Bonus</b> = 1 + 0.5 (Prime) + server booster + other bonuses (these two together cap at 10) + unspent shards × 0.12 (0.10 without Prime) × (1 + 0.1 × Resonance). Matches /stats.</li>
+                <li><b>Bank</b>: raw per hour = min(balance × interest rate, 100B). A claim pays raw × bank bonus × (1 + 0.1 × Interest) × Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. Below about 0.89T of balance the raw drops, so the plan always keeps that much. Matches /bank.</li>
+                <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–16 cost 1.5T, 5T, 15T, 50T, 150T; the other levels are extrapolated (500T, 1.5Qa, 5Qa, 15Qa). Artifacts needed for upgrades are ignored.</li>
+                <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
+                <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
+                <li><b>Rewards</b>: daily and primedaily 100,000, weekly 1,000,000, monthly 10,000,000, each × Income × Income Bonus × (1 + 0.1 × Rewards). The plan holds weekly and monthly for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
+                <li><b>Ascend</b>: needs P ≥ 1000 and 50T in the bank; gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards. Rounding is not confirmed.</li>
+                <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5). That Resonance, Yield, Interest and Rewards add up per level is an assumption; only level 1 is confirmed.</li>
+                <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
+                <li><b>Optimiser</b>: at every Ascend it tries shop purchases and target prestiges, simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
+              </ul>
+            </details>
+          </section>
+        </div>
+      </section>
 
+      <section id="rounds" role="tabpanel" aria-labelledby="tab-rounds" class="results" hidden>
+        <div class="panel">
+          <fieldset>
+            <legend>Run settings</legend>
+            <label class="check"><input id="rUseAcc" type="checkbox"> Use my account</label>
+            <div class="fields three">
+              <div class="f"><label for="rP">Prestige</label><input class="num" id="rP" type="number" min="0" step="1"></div>
+              <div class="f"><label for="rR">Rank (1–100)</label><input class="num" id="rR" type="number" min="1" max="100" step="1"></div>
+              <div class="f"><label for="rIB">Income Bonus</label><input class="num" id="rIB" type="number" min="0" step="0.01"></div>
+            </div>
+            <label class="check"><input id="rReinvest" type="checkbox"> Buy prestige after every block (if the game applies it right away)</label>
+            <p class="derived" id="rDerived"></p>
+          </fieldset>
+        </div>
+        <div class="kpis" id="rKpis"></div>
+        <section class="panel">
+          <h2>Reward per round</h2>
+          <p class="hint">Points arrive every 5 rounds from round 10. Each block is worth 1.4 times the previous one.</p>
+          <div class="tablebox tall"><table id="roundTable"></table></div>
+        </section>
+      </section>
     </main>
+  </div>
+</div>
 
-    <script>
-        // format massive numbers with suffixes to avoid js scientific notation
-        function formatNumber(num) {
-            if (num === 0) return "0.00";
-            if (num < 1000 && num > -1000) return num.toFixed(2);
-            
-            const suffixes = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"];
-            const tier = Math.floor(Math.log10(Math.abs(num)) / 3);
-            
-            // fallback to scientific notation only if it exceeds defined suffixes
-            const suffix = suffixes[tier];
-            if (!suffix && tier >= suffixes.length) {
-                return num.toExponential(2);
-            }
-            
-            const scale = Math.pow(10, tier * 3);
-            const scaled = num / scale;
-            
-            return scaled.toFixed(2) + " " + suffix;
-        }
+<script src="model.js"></script>
+<script>
+(function () {
+  'use strict';
+  const M = window.NexusModel;
+  const $ = id => document.getElementById(id);
+  const KEY = 'nexus-calculator-v2';
+  const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
+    'other', 'minGap', 'lookahead', 'round', 'rP', 'rR', 'rIB'];
+  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'paste'];
+  const CHK_IDS = ['prime', 'boost', 'loan', 'floorShards', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
+  const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
+  const SERIES = [
+    { name: 'Recommended plan', short: 'Plan', color: 'var(--s1)' },
+    { name: 'P* without upgrades', short: 'P*', color: 'var(--s2)' },
+    { name: 'Always P2000', short: 'P2000', color: 'var(--s3)' },
+    { name: 'Always P1000', short: 'P1000', color: 'var(--s4)' }
+  ];
+  let botIB = null;
 
-        // main calculation logic executed on button click
-        function calculate() {
-            console.log("calculating economy progression...");
-            
-            // retrieve and parse inputs
-            const prestige = parseFloat(document.getElementById('prestige').value) || 0;
-            const rank = parseFloat(document.getElementById('rank').value) || 0;
-            const incomeBonus = parseFloat(document.getElementById('incomeBonus').value) || 0;
+  for (let L = 1; L <= 20; L++) $('bankLv').append(new Option(String(L), String(L)));
 
-            // core math for base reward
-            const incomeMultiplier = (prestige * 100) + rank;
-            const baseReward = 1500 * incomeMultiplier * incomeBonus;
+  function defaultDate() {
+    const now = new Date();
+    let d = new Date(now.getFullYear(), 11, 1, 0, 0);
+    if (d - now < 24 * 3600e3) d = new Date(now.getFullYear() + 1, 11, 1, 0, 0);
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T00:00`;
+  }
+  // example account, replaced by whatever the visitor enters (kept in this browser)
+  const DEFAULTS = {
+    P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
+    nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 12, lookahead: 14, round: 150,
+    rP: 1000, rR: 100, rIB: 11.74,
+    bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', paste: '',
+    prime: true, boost: true, loan: true, floorShards: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
+    rUseAcc: true, rReinvest: false
+  };
 
-            const tbody = document.getElementById('resultsBody');
-            tbody.innerHTML = ''; 
-            
-            // display the hidden table wrapper
-            document.getElementById('resultsSection').classList.remove('hidden');
+  // ---- numbers ----
+  const SUF = { k: 1e3, m: 1e6, b: 1e9, t: 1e12, qa: 1e15, qi: 1e18, sx: 1e21, sp: 1e24 };
+  function parsePts(s) {
+    s = String(s || '').trim().replace(/\s/g, '').replace(/points?|pts/i, '');
+    const m = s.match(/^([\d.,]+)(k|m|b|t|qa|qi|sx|sp)?$/i);
+    if (!m) return NaN;
+    if (m[2]) return parseFloat(m[1].replace(',', '.')) * SUF[m[2].toLowerCase()];
+    return parseFloat(m[1].replace(/[.,]/g, ''));
+  }
+  const NF = d => new Intl.NumberFormat('en-US', { maximumFractionDigits: d, minimumFractionDigits: 0 });
+  const UNITS = [[1e33, 'Dc'], [1e30, 'No'], [1e27, 'Oc'], [1e24, 'Sp'], [1e21, 'Sx'], [1e18, 'Qi'], [1e15, 'Qa'], [1e12, 'T'], [1e9, 'B'], [1e6, 'M']];
+  const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
+  function sci(x) {
+    if (!isFinite(x)) return 'off the scale';
+    const e = Math.floor(Math.log10(x));
+    return NF(2).format(x / Math.pow(10, e)) + '×10' + String(e).split('').map(c => SUP[c]).join('');
+  }
+  function fmtPts(x) {
+    if (!isFinite(x)) return 'off the scale';
+    if (x >= 1e36) return sci(x);
+    for (const [v, u] of UNITS) if (x >= v) return NF(x / v >= 100 ? 0 : 2).format(x / v) + ' ' + u;
+    return NF(0).format(x);
+  }
+  function fmtIB(x) {
+    if (!isFinite(x)) return 'off the scale';
+    if (x >= 1e6) return sci(x) + 'x';
+    return NF(x >= 1000 ? 0 : 2).format(x) + 'x';
+  }
+  function fmtInt(x) { return isFinite(x) ? (x >= 1e15 ? sci(x) : NF(0).format(Math.round(x))) : 'off the scale'; }
+  let NOW = Date.now();
+  function fmtWhen(h) {
+    return new Date(NOW + h * 3600e3).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+  const fmtDay = h => new Date(NOW + h * 3600e3).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  function fmtDur(h) {
+    if (h < 1) return Math.max(1, Math.round(h * 60)) + ' min';
+    if (h < 48) return NF(h < 10 ? 1 : 0).format(h) + ' h';
+    return NF(1).format(h / 24) + ' days';
+  }
 
-            let totalEarned = 0;
-            const fragment = document.createDocumentFragment();
+  // ---- inputs and storage ----
+  function setVal(id, v) { const e = $(id); if (CHK_IDS.includes(id)) e.checked = !!v; else e.value = v; }
+  function getVals() {
+    const o = {};
+    for (const id of NUM_IDS.concat(TXT_IDS)) o[id] = $(id).value;
+    for (const id of CHK_IDS) o[id] = $(id).checked;
+    return o;
+  }
+  function load() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { saved = null; }
+    const v = Object.assign({}, DEFAULTS, saved || {});
+    for (const k of Object.keys(DEFAULTS)) setVal(k, v[k]);
+    let tab = 'planner';
+    try { tab = localStorage.getItem(KEY + '-tab') || tab; } catch (e) { /* storage unavailable */ }
+    if (location.hash === '#rounds' || location.hash === '#planner') tab = location.hash.slice(1);
+    showTab(tab);
+  }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(getVals())); } catch (e) { /* storage unavailable */ } }
+  const num = (id, d) => { const x = parseFloat($(id).value); return isFinite(x) ? x : d; };
 
-            // calculate rounds from 10 to 255, step 5
-            for (let r = 10; r <= 255; r += 5) {
-                const reward = baseReward * Math.pow(1.40, (r / 5.0) - 1.0);
-                totalEarned += reward;
+  function clampRank(id) {
+    const e = $(id);
+    const v = Math.round(num(id, 1));
+    const c = Math.min(100, Math.max(1, v));
+    if (String(c) !== e.value) e.value = c;
+  }
 
-                // construct table row dynamically
-                const tr = document.createElement('tr');
-                tr.className = 'hover:bg-gray-700/50 transition-colors duration-150';
+  function readCfg() {
+    const c = M.defaults();
+    c.shards = Math.max(0, Math.round(num('shards', 0)));
+    c.prime = $('prime').checked;
+    c.server = $('boost').checked ? 1 : 0;
+    c.other = Math.max(0, num('other', 0));
+    for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) c[k] = Math.max(0, Math.round(num(k, 0)));
+    c.disc = Math.min(5, c.disc);
+    c.P = Math.max(0, Math.round(num('P', 0)));
+    c.R = Math.min(100, Math.max(1, Math.round(num('R', 1))));
+    const bal = parsePts($('bal').value);
+    c.bal = isFinite(bal) ? bal : 0;
+    c.bankLv = Math.min(20, Math.max(1, Math.round(num('bankLv', 15))));
+    c.bankBonus = 1 + 0.05 * (c.bankLv - 1);
+    c.rate = ((c.prime ? 1.25 : 0.25) + Math.max(0, num('artifact', 0))) / 100;
+    const raw = parsePts($('rawCap').value);
+    c.rawCap = isFinite(raw) && raw > 0 ? raw : 1e11;
+    c.nextIn = { daily: num('nDaily', 24), prime: num('nPrime', 24), weekly: num('nWeekly', 168), monthly: num('nMonthly', 720) };
+    c.loan = $('loan').checked; c.floorShards = $('floorShards').checked;
+    c.allowShop = $('allowShop').checked; c.allowBank = $('allowBank').checked; c.useRewards = $('useRewards').checked;
+    c.minGap = Math.max(1, num('minGap', 12));
+    c.lookahead = Math.max(3, num('lookahead', 14)) * 24;
+    c.objective = $('objective').value;
+    c.round = Math.min(255, Math.max(10, Math.round(num('round', 150) / 5) * 5));
+    c.reinvest = $('reinvest').checked;
+    c.horizonH = (new Date($('targetDate').value).getTime() - NOW) / 3600e3;
+    c.budget = 500;
+    return c;
+  }
 
-                const tdRound = document.createElement('td');
-                tdRound.className = 'p-4 text-gray-300 font-medium whitespace-nowrap';
-                tdRound.textContent = r;
+  // ---- bot message import ----
+  function parseBot(text) {
+    const found = {};
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length);
+    const label = l => l.replace(/^[^A-Za-z]+/, '').trim().toLowerCase();
+    const after = name => {
+      for (let i = 0; i < lines.length - 1; i++) if (label(lines[i]) === name) return lines[i + 1];
+      return null;
+    };
+    let m;
+    if ((m = text.match(/(\d[\d.,]*)\s+unspent/i)) || (m = text.match(/(\d[\d.,]*)\s+shards\s*\S\s*\+/i))) found.shards = parsePts(m[1]);
+    if (/Prime\s*\n\s*Active/i.test(text) || /\(Prime\)/i.test(text)) found.prime = true;
+    if ((m = text.match(/Server Boost\s*`?\+([\d.]+)/i))) found.boost = parseFloat(m[1]) > 0;
+    const p = after('prestige'); if (p && /^[\d.,]+$/.test(p)) found.P = parsePts(p);
+    const r = after('rank'); if (r && /^[\d.,]+$/.test(r)) found.R = Math.min(100, parsePts(r));
+    const b = after('bank balance') || after('bank') || after('new bank'); if (b && /points/i.test(b)) found.bal = b.replace(/\s*points?/i, '');
+    const lv = after('bank level') || after('bank lv'); if (lv && (m = lv.match(/^(\d+)/))) found.bankLv = +m[1];
+    const ir = after('interest rate'); if (ir && (m = ir.match(/([\d.]+)%/))) found.artifact = Math.max(0, parseFloat(m[1]) - (found.prime || $('prime').checked ? 1.25 : 0.25));
+    const ib = after('income bonus'); if (ib && (m = ib.match(/([\d.]+)x/))) botIB = parseFloat(m[1]);
+    const up = [['res', /Shard Resonance\s*\S\s*Lv\s*(\d+)/i], ['yld', /Shard Yield\s*\S\s*Lv\s*(\d+)/i], ['intr', /(?:^|\n)\W*Interest\s*[^\w\s]\s*Lv\s*(\d+)/i],
+      ['rew', /Rewards\s*[^\w\s]\s*Lv\s*(\d+)/i], ['disc', /Prestige Discount\s*[^\w\s]\s*Lv\s*(\d+)/i]];
+    for (const [k, re] of up) if ((m = text.match(re))) found[k] = +m[1];
+    return found;
+  }
 
-                const tdReward = document.createElement('td');
-                tdReward.className = 'p-4 text-emerald-400 font-mono text-right whitespace-nowrap';
-                tdReward.textContent = formatNumber(reward);
+  // ---- dom helpers ----
+  function el(tag, attrs, ...kids) {
+    const e = document.createElement(tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) { if (k === 'class') e.className = v; else e.setAttribute(k, v); }
+    for (const k of kids) if (k !== null && k !== undefined && k !== '') e.append(k instanceof Node ? k : document.createTextNode(String(k)));
+    return e;
+  }
+  const cmd = t => el('code', null, t);
+  const li = (...parts) => el('li', null, ...parts);
+  function stepAt(pts, h, key) {
+    key = key || 'ib';
+    let v = pts[0][key];
+    for (const p of pts) { if (p.t <= h + 1e-9) v = p[key]; else break; }
+    return v;
+  }
+  function mergeBuys(list) {
+    const out = [];
+    for (const b of list) {
+      const last = out[out.length - 1];
+      if (last && last.key === b.key && last.key !== 'bank' && last.level === b.from) { last.level = b.level; last.cost += b.cost; }
+      else out.push(Object.assign({}, b));
+    }
+    return out;
+  }
+  function buyText(b) {
+    if (b.key === 'bank') return `Bank Lv${b.level} (${fmtPts(b.cost)})`;
+    return `${NAMES[b.key]} ${b.from}→${b.level} (${fmtInt(b.cost)} shards)`;
+  }
+  const buysText = list => mergeBuys(list).map(buyText).join(', ');
 
-                const tdTotal = document.createElement('td');
-                tdTotal.className = 'p-4 text-cyan-400 font-mono text-right font-bold whitespace-nowrap';
-                tdTotal.textContent = formatNumber(totalEarned);
+  // ---- account readout ----
+  function readout(cfg) {
+    const st = M.initState(cfg, 0);
+    const ib = M.ibOf(cfg, st);
+    $('roIB').textContent = fmtIB(ib);
+    $('roPM').textContent = fmtInt((cfg.P + 1) * cfg.R) + 'x';
+    $('roBank').textContent = fmtPts(M.bankRateOf(cfg, st));
+    const note = $('roNote');
+    note.textContent = '';
+    if (botIB !== null) note.append(Math.abs(botIB - ib) < 0.015 ? 'Same Income Bonus as the bot.' : `The bot says ${NF(2).format(botIB)}x: check the fields.`);
+    else if (cfg.R < 100) note.append(`At rank 100 your Income would be ${fmtInt((cfg.P + 1) * 100)}x.`);
+    $('bankDerived').textContent = '';
+    $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'),
+      ' · keep at least ', el('b', null, fmtPts(M.reserveOf(cfg))), ' in the bank for full interest');
+  }
 
-                tr.appendChild(tdRound);
-                tr.appendChild(tdReward);
-                tr.appendChild(tdTotal);
-                fragment.appendChild(tr);
-            }
+  // ---- planner rendering ----
+  const kpi = (k, v, d) => el('div', { class: 'kpi' }, el('span', { class: 'k' }, k), el('span', { class: 'v' }, v), d ? el('span', { class: 'd' }, d) : null);
 
-            // append all rows to dom at once for performance
-            tbody.appendChild(fragment);
-            console.log("calculation complete.");
-        }
-    </script>
+  function render(res) {
+    const cfg = res.cfg, o = res.optimal, L = o.log, H = cfg.horizonH;
+    const limitT = Math.min(L.int64At !== undefined ? L.int64At : Infinity, L.overflowAt !== undefined ? L.overflowAt : Infinity);
+    const capped = isFinite(limitT) && limitT < H;
+    const final = L.final || {};
+    const kp = $('kpis'); kp.textContent = '';
+    const first = L.ascends[0];
+    if (cfg.objective === 'bo2') {
+      kp.append(kpi('Run payout', fmtPts(final.reward), `up to round ${cfg.round}`));
+      kp.append(kpi('Enter the run with', 'Income ' + fmtInt(final.pm) + 'x', 'Income Bonus ' + fmtIB(final.ib)));
+    } else if (capped) {
+      kp.append(kpi('Income Bonus on ' + fmtDay(limitT), fmtIB(stepAt(o.pts, limitT)), 'today ' + fmtIB(res.now.ib) + ' · later: off the scale'));
+      kp.append(kpi('Bank per hour on ' + fmtDay(limitT), fmtPts(stepAt(o.pts, limitT, 'rate')), 'today ' + fmtPts(res.now.rate)));
+    } else {
+      kp.append(kpi('Income Bonus on the date', fmtIB(final.ib), 'today ' + fmtIB(res.now.ib)));
+      kp.append(kpi('Bank per hour on the date', fmtPts(final.rate), 'today ' + fmtPts(res.now.rate)));
+    }
+    kp.append(kpi('Next Ascend', first ? 'P' + fmtInt(first.P) : 'none', first ? fmtWhen(first.t) : 'not worth it before the date'));
+    const nAsc = capped ? L.ascends.filter(a => a.t <= limitT).length : L.ascends.length + (L.finalAscend ? 1 : 0);
+    kp.append(kpi('Ascends in the plan', String(nAsc), 'until ' + fmtDay(capped ? limitT : H)));
+
+    const w = $('warnings'); w.textContent = '';
+    if (capped) {
+      w.append(el('p', { class: 'note' }, el('strong', null, 'After ' + fmtWhen(limitT) + ' the model stops being reliable. '),
+        'From there, balances and rewards pass 9.22 Qi, the largest 64-bit integer: if the bot stores points that way, it breaks. '
+        + 'Weekly and monthly rewards grow with prestige × Income Bonus and Ascends turn them into shards with the square of prestige, so taken literally the economy has no ceiling. '
+        + 'Trust the next few weeks of the plan, not the numbers at the end.'));
+    }
+    renderActions(res);
+    const series = [o.pts, res.baselines[0].run.pts, res.baselines.find(b => b.P === 2000).run.pts, res.baselines.find(b => b.P === 1000).run.pts]
+      .map((pts, i) => ({ s: SERIES[i], pts: pts }));
+    renderChart(series, capped ? limitT : H, H);
+    renderPlan(res, limitT);
+    renderCompare(res);
+  }
+
+  function renderActions(res) {
+    const cfg = res.cfg, L = res.optimal.log;
+    const ol = $('actions'); ol.textContent = '';
+    const buys0 = L.buys.filter(b => b.t < 1e-6);
+    const disc = cfg.disc + buys0.filter(b => b.key === 'disc').reduce((a, b) => a + b.n, 0);
+    const d = 1 - 0.05 * disc;
+    const reserve = M.reserveOf(cfg);
+    const W0 = M.cumPR(cfg.P, cfg.R, d) + cfg.bal;
+    const tgt = L.targets.length ? L.targets[0].target : Infinity;
+    const Q = M.pAff(W0 - reserve, d);
+
+    ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), '.'));
+    if (buys0.length) {
+      const st = M.initState(cfg, 0);
+      for (const b of buys0) if (b.key !== 'bank') { st.S -= b.cost; st[b.key] = b.level; }
+      ol.append(li('Buy in the shard shop: ', buysText(buys0), '. Your Income Bonus drops to ', fmtIB(M.ibOf(cfg, st)), ', and the next Ascends pay it back.'));
+    } else if (cfg.allowShop) {
+      ol.append(li('Don’t buy shard upgrades yet: none of them pays off within ' + Math.round(cfg.lookahead / 24) + ' days.'));
+    }
+    const top = isFinite(tgt) ? Math.min(Q, tgt) : Q;
+    const Pnow = top - 1;
+    if (Pnow > cfg.P || (Pnow === cfg.P && cfg.R < 100)) {
+      const left = W0 - M.cumPR(Pnow, 100, d);
+      ol.append(li('Buy prestige: ', cmd('/prestigeupto ' + Pnow), ' then ', cmd('/rankupmax'), `. You end at P${fmtInt(Pnow)} R100 with Income ${fmtInt(100 * top)}x (it would be ${fmtInt(Pnow + 1)}x at R1). About ${fmtPts(left)} stays in the bank: don’t go below ${fmtPts(reserve)} or interest drops.`));
+    } else if (cfg.R < 100 && Q >= cfg.P + 1) {
+      ol.append(li('Max your rank with ', cmd('/rankupmax'), `: Income goes from ${fmtInt((cfg.P + 1) * cfg.R)}x to ${fmtInt((cfg.P + 1) * 100)}x.`));
+    }
+    if (cfg.useRewards) {
+      const pm = 100 * Math.max(1, top);
+      const extra = cfg.prime ? [' and ', cmd('/primedaily')] : [];
+      ol.append(li('Claim ', cmd('/daily'), ...extra, ' only after raising prestige and rank: right now each is worth about ', fmtPts(1e5 * pm * res.now.ib * (1 + 0.1 * cfg.rew)),
+        '. Keep weekly and monthly for right before an Ascend, when prestige is highest.'));
+    }
+    const a = L.ascends[0];
+    if (a) {
+      const need = M.costToP(a.P, d) + cfg.minBal;
+      ol.append(li(`Next Ascend at P${fmtInt(a.P)} on ${fmtWhen(a.t)} (in ${fmtDur(a.t)}). You need ${fmtPts(need)} in total between prestige bought and bank. Order: `,
+        cmd('/claiminterest'), ', weekly and monthly if ready, ', cmd('/prestigeupto ' + (a.P - 1)), ', ', cmd('/rankupmax'), ', keep 50T in the bank, ', cmd('/prestige'), ', ', cmd('/ascend'),
+        cfg.loan ? '. Then borrow 0.9T, ' : '. ', cfg.loan ? cmd('/claiminterest') : null, cfg.loan ? ' and pay it back.' : null,
+        ` You get ${fmtInt(a.gain)} shards: Income Bonus ${fmtIB(a.ib)}.`));
+      if (a.buys.length) ol.append(li('Right after that Ascend, buy: ', buysText(a.buys), '.'));
+    } else if (cfg.objective !== 'bo2') {
+      const fa = L.finalAscend;
+      ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtInt(fa.P)} (+${fmtInt(fa.gain)} shards).` : 'You can’t reach P1000 with 50T before the date: keep buying prestige.'));
+    }
+    if (cfg.objective === 'bo2' && L.final) {
+      ol.append(li(`On ${fmtWhen(cfg.horizonH)}, start the run at R100 of your highest prestige: Income ${fmtInt(L.final.pm)}x, Income Bonus ${fmtIB(L.final.ib)}. Up to round ${cfg.round} it pays about ${fmtPts(L.final.reward)}.`));
+    }
+  }
+
+  function renderChart(series, xEnd, H) {
+    const box = $('chartbox'); box.textContent = '';
+    const lg = $('legend'); lg.textContent = '';
+    for (const { s } of series) { const i = el('i'); i.style.background = s.color; lg.append(el('span', null, i, s.name)); }
+    $('chartHint').textContent = 'Log scale. ' + (xEnd < H - 1e-6 ? 'The chart stops where the model stops being reliable.' : 'Hover the chart to read values.');
+    const W = 760, Hh = 300, ml = 64, mr = 112, mt = 12, mb = 30, pw = W - ml - mr, ph = Hh - mt - mb;
+    let ymin = Infinity, ymax = -Infinity;
+    for (const { pts } of series) for (const p of pts) if (p.t <= xEnd + 1e-9 && isFinite(p.ib)) { ymin = Math.min(ymin, p.ib); ymax = Math.max(ymax, p.ib); }
+    const l0 = Math.floor(Math.log10(ymin)), l1 = Math.max(l0 + 1, Math.ceil(Math.log10(ymax)));
+    const X = t => ml + pw * t / xEnd;
+    const Y = v => mt + ph * (1 - (Math.log10(v) - l0) / (l1 - l0));
+    const NS = 'http://www.w3.org/2000/svg';
+    const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
+    const svg = mk('svg', { viewBox: `0 0 ${W} ${Hh}`, class: 'chart', role: 'img', 'aria-label': 'Income Bonus over time for four strategies' });
+    const span = l1 - l0, stepDec = span <= 6 ? 1 : Math.ceil(span / 6);
+    const ticks = [];
+    for (let e = l0; e <= l1; e += stepDec) { ticks.push(Math.pow(10, e)); if (span <= 2 && e < l1) ticks.push(2 * Math.pow(10, e), 5 * Math.pow(10, e)); }
+    for (const v of ticks) {
+      const y = Y(v);
+      if (y < mt - 1 || y > mt + ph + 1) continue;
+      svg.append(mk('line', { x1: ml, x2: ml + pw, y1: y, y2: y, stroke: 'var(--grid)', 'stroke-width': 1 }));
+      const t = mk('text', { x: ml - 8, y: y + 4, 'text-anchor': 'end' }); t.textContent = fmtIB(v); svg.append(t);
+    }
+    svg.append(mk('line', { x1: ml, x2: ml + pw, y1: mt + ph, y2: mt + ph, stroke: 'var(--axis)', 'stroke-width': 1 }));
+    const days = xEnd / 24, dstep = days <= 10 ? 1 : days <= 30 ? 5 : days <= 70 ? 10 : 20;
+    for (let dd = 0; dd <= days + 1e-9; dd += dstep) {
+      const t = mk('text', { x: X(dd * 24), y: mt + ph + 18, 'text-anchor': dd === 0 ? 'start' : 'middle' });
+      t.textContent = new Date(NOW + dd * 86400e3).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+      svg.append(t);
+    }
+    const labels = [];
+    for (let i = series.length - 1; i >= 0; i--) {
+      const { s, pts } = series[i];
+      let d = '', prev = null;
+      for (const p of pts) {
+        if (p.t > xEnd + 1e-9 || !isFinite(p.ib)) break;
+        d += prev === null ? `M${X(p.t).toFixed(1)},${Y(p.ib).toFixed(1)}` : `H${X(p.t).toFixed(1)}V${Y(p.ib).toFixed(1)}`;
+        prev = p;
+      }
+      if (prev) d += `H${X(xEnd).toFixed(1)}`;
+      svg.append(mk('path', { d: d, fill: 'none', stroke: s.color, 'stroke-width': i === 0 ? 2.5 : 2, 'stroke-linejoin': 'round' }));
+      if (prev) labels.push({ y: Y(prev.ib), text: s.short + ' ' + fmtIB(prev.ib) });
+    }
+    labels.sort((a, b) => a.y - b.y);
+    for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
+    for (const lb of labels) {
+      const t = mk('text', { x: ml + pw + 8, y: lb.y + 4 });
+      t.style.fill = 'var(--ink-2)'; t.textContent = lb.text; svg.append(t);
+    }
+    const cross = mk('line', { x1: 0, x2: 0, y1: mt, y2: mt + ph, stroke: 'var(--muted)', 'stroke-width': 1, visibility: 'hidden' });
+    svg.append(cross);
+    const hit = mk('rect', { x: ml, y: mt, width: pw, height: ph, fill: 'transparent', tabindex: 0 });
+    svg.append(hit);
+    box.append(svg);
+    const tip = el('div', { class: 'tip', hidden: '' });
+    box.append(tip);
+    function show(clientX) {
+      const r = svg.getBoundingClientRect();
+      const t = Math.max(0, Math.min(xEnd, ((clientX - r.left) * W / r.width - ml) / pw * xEnd));
+      const x = X(t);
+      cross.setAttribute('x1', x); cross.setAttribute('x2', x); cross.setAttribute('visibility', 'visible');
+      tip.textContent = '';
+      tip.append(el('div', { class: 't' }, fmtWhen(t)));
+      for (const { s, pts } of series) {
+        const i = el('i'); i.style.background = s.color;
+        tip.append(el('div', { class: 'r' }, el('span', null, i, s.name), el('b', null, fmtIB(stepAt(pts, t)))));
+      }
+      tip.hidden = false;
+      const px = x * r.width / W;
+      tip.style.left = Math.max(0, px + 190 > r.width ? px - 190 : px + 12) + 'px';
+      tip.style.top = '8px';
+    }
+    const hide = () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); };
+    hit.addEventListener('pointermove', e => show(e.clientX));
+    hit.addEventListener('pointerleave', hide);
+    hit.addEventListener('focus', () => { const r = svg.getBoundingClientRect(); show(r.left + r.width * (ml + pw) / W - 1); });
+    hit.addEventListener('blur', hide);
+  }
+
+  function renderPlan(res, limitT) {
+    const L = res.optimal.log, cfg = res.cfg;
+    const tb = $('planTable'); tb.textContent = '';
+    tb.append(el('thead', null, el('tr', null, el('th', null, '#'), el('th', null, 'When'), el('th', null, 'Ascend at'), el('th', { class: 'r' }, 'Shards'),
+      el('th', { class: 'r' }, 'IB after'), el('th', { class: 'r' }, 'Bank/hr after'), el('th', null, 'Notes'))));
+    const body = el('tbody');
+    const rows = L.ascends.map((a, i) => ({ a: a, i: i }));
+    if (L.finalAscend) rows.push({ a: Object.assign({ buys: [] }, L.finalAscend, { t: cfg.horizonH }), i: L.ascends.length, final: true });
+    if (!rows.length) body.append(el('tr', null, el('td', { colspan: 7 }, 'No Ascend before the date.')));
+    let shownOver = 0;
+    const hidden = rows.filter(r => r.a.t > limitT).length - 1;
+    for (const { a, i, final } of rows) {
+      const over = a.t > limitT;
+      if (over && shownOver++ >= 1) continue;
+      const notes = el('td');
+      const rw = L.rewards.filter(r => Math.abs(r.t - a.t) < 1e-6 && (r.kind === 'weekly' || r.kind === 'monthly')).map(r => r.kind);
+      if (rw.length) notes.append('claim ' + rw.join(' + ') + ' first. ');
+      if (a.buys && a.buys.length) notes.append('then buy ' + buysText(a.buys) + '. ');
+      if (final) notes.append('on the goal date. ');
+      if (over) notes.append(el('span', { class: 'chip' }, 'past the limit'));
+      body.append(el('tr', over ? { class: 'over' } : null,
+        el('td', { class: 'n' }, String(i + 1)), el('td', { class: 'n' }, fmtWhen(a.t)), el('td', { class: 'n' }, 'P' + fmtInt(a.P)),
+        el('td', { class: 'n r' }, '+' + fmtInt(a.gain)), el('td', { class: 'n r' }, fmtIB(a.ib)), el('td', { class: 'n r' }, fmtPts(a.rate)), notes));
+    }
+    if (hidden > 0) body.append(el('tr', { class: 'over' }, el('td', { colspan: 7 }, `${hidden} more Ascends past the model’s limit are not shown.`)));
+    tb.append(body);
+  }
+
+  function renderCompare(res) {
+    const bo2 = res.cfg.objective === 'bo2';
+    const tb = $('cmpTable'); tb.textContent = '';
+    tb.append(el('thead', null, el('tr', null, el('th', null, 'Strategy'), el('th', { class: 'r' }, bo2 ? 'Run payout' : 'IB on the date'),
+      el('th', { class: 'r' }, bo2 ? 'IB on the date' : 'Bank/hr on the date'), el('th', { class: 'r' }, 'Ascends'), el('th', { class: 'r' }, 'Upgrades bought'))));
+    const body = el('tbody');
+    const names = ['P* without upgrades', 'Always P1000', 'Always P1500', 'Always P2000', 'Always P3000'];
+    const rows = [{ name: 'Recommended plan', run: res.optimal, best: true }].concat(res.baselines.map((b, i) => ({ name: names[i], run: b.run })));
+    for (const r of rows) {
+      const f = r.run.log.final || {};
+      body.append(el('tr', null,
+        el('td', null, r.name, r.best ? ' ' : null, r.best ? el('span', { class: 'chip best' }, 'recommended') : null),
+        el('td', { class: 'n r' }, bo2 ? fmtPts(f.reward) : fmtIB(f.ib)),
+        el('td', { class: 'n r' }, bo2 ? fmtIB(f.ib) : fmtPts(f.rate)),
+        el('td', { class: 'n r' }, String(r.run.log.ascends.length + (r.run.log.finalAscend ? 1 : 0))),
+        el('td', { class: 'n r' }, String(mergeBuys(r.run.log.buys).length))));
+    }
+    tb.append(body);
+  }
+
+  // ---- round rewards ----
+  function renderRounds(cfg) {
+    const useAcc = $('rUseAcc').checked;
+    for (const id of ['rP', 'rR', 'rIB']) $(id).disabled = useAcc;
+    const st = M.initState(cfg, 0);
+    if (useAcc) { $('rP').value = cfg.P; $('rR').value = cfg.R; $('rIB').value = Math.round(M.ibOf(cfg, st) * 100) / 100; }
+    const P = Math.max(0, Math.round(num('rP', 0)));
+    const R = Math.min(100, Math.max(1, Math.round(num('rR', 1))));
+    const ib = Math.max(0, num('rIB', 1));
+    const pm0 = (P + 1) * R;
+    const bankRate = M.bankRateOf(cfg, st);
+    const reinvest = $('rReinvest').checked;
+    const d = M.dOf(st), reserve = M.reserveOf(cfg);
+    let W = M.cumPR(P, R, d) + (useAcc ? cfg.bal : reserve);
+    let pm = pm0, tot = 0;
+    const rows = [];
+    for (let r = 10; r <= 255; r += 5) {
+      const rew = 1500 * pm * ib * Math.pow(1.4, r / 5 - 1);
+      tot += rew;
+      rows.push({ r: r, pm: pm, rew: rew, tot: tot });
+      if (reinvest) { W += rew; pm = Math.max(pm, M.pmAt(W - reserve, d)); }
+    }
+    $('rDerived').textContent = '';
+    $('rDerived').append('Income ', el('b', null, fmtInt(pm0) + 'x'), ' = (prestige + 1) × rank',
+      R < 100 ? ['. At rank 100 it would be ', el('b', null, fmtInt((P + 1) * 100) + 'x')].reduce((f, x) => (f.append(x), f), document.createDocumentFragment()) : '',
+      '. Your bank makes ', el('b', null, fmtPts(bankRate) + '/hr'), '.');
+    const k = $('rKpis'); k.textContent = '';
+    for (const r of [100, 150, 200, 255]) {
+      const row = rows.find(x => x.r === r);
+      k.append(kpi('Total at round ' + r, fmtPts(row.tot), '= ' + fmtDur(row.tot / bankRate) + ' of bank'));
+    }
+    const tb = $('roundTable'); tb.textContent = '';
+    const head = [el('th', null, 'Round'), el('th', { class: 'r' }, 'Block reward'), el('th', { class: 'r' }, 'Total earned'), el('th', { class: 'r' }, 'Hours of bank')];
+    if (reinvest) head.splice(1, 0, el('th', { class: 'r' }, 'Income'));
+    tb.append(el('thead', null, el('tr', null, ...head)));
+    const body = el('tbody');
+    for (const x of rows) {
+      const cells = [el('td', { class: 'n' }, String(x.r)), el('td', { class: 'n r' }, fmtPts(x.rew)), el('td', { class: 'n r' }, fmtPts(x.tot)), el('td', { class: 'n r' }, NF(x.tot / bankRate < 10 ? 1 : 0).format(x.tot / bankRate))];
+      if (reinvest) cells.splice(1, 0, el('td', { class: 'n r' }, fmtInt(x.pm) + 'x'));
+      body.append(el('tr', x.r % 50 === 0 ? { class: 'mile' } : null, ...cells));
+    }
+    tb.append(body);
+  }
+
+  // ---- tabs ----
+  function showTab(name) {
+    for (const t of ['planner', 'rounds']) {
+      $(t).hidden = t !== name;
+      $('tab-' + t).setAttribute('aria-selected', String(t === name));
+      $('tab-' + t).tabIndex = t === name ? 0 : -1;
+    }
+    try { localStorage.setItem(KEY + '-tab', name); } catch (e) { /* storage unavailable */ }
+  }
+  for (const t of ['planner', 'rounds']) $('tab-' + t).addEventListener('click', () => { showTab(t); if (t === 'rounds') renderRounds(readCfg()); });
+  $('tab-planner').addEventListener('keydown', e => { if (e.key === 'ArrowRight') { showTab('rounds'); $('tab-rounds').focus(); renderRounds(readCfg()); } });
+  $('tab-rounds').addEventListener('keydown', e => { if (e.key === 'ArrowLeft') { showTab('planner'); $('tab-planner').focus(); } });
+
+  // ---- compute (in a worker when available) ----
+  let worker = null, jobId = 0;
+  try {
+    worker = new Worker('worker.js');
+    worker.onmessage = e => {
+      if (e.data.id !== jobId) return;
+      $('out').classList.remove('busy');
+      if (e.data.error) showError(e.data.error); else render(e.data.res);
+    };
+    worker.onerror = () => { worker = null; };
+  } catch (e) { worker = null; }
+
+  function showError(msg) {
+    $('warnings').textContent = '';
+    $('warnings').append(el('p', { class: 'note' }, el('strong', null, 'The plan could not be calculated. '), 'Check the number fields. (' + msg + ')'));
+  }
+
+  let timer = null;
+  const schedule = () => { clearTimeout(timer); timer = setTimeout(run, 250); };
+  function run() {
+    NOW = Date.now();
+    clampRank('R'); clampRank('rR');
+    save();
+    document.querySelectorAll('.bo2only').forEach(e => { e.hidden = $('objective').value !== 'bo2'; });
+    const cfg = readCfg();
+    $('bal').classList.toggle('bad', !isFinite(parsePts($('bal').value)));
+    readout(cfg);
+    renderRounds(cfg);
+    if (!(cfg.horizonH > 1)) {
+      $('kpis').textContent = '';
+      $('warnings').textContent = '';
+      $('warnings').append(el('p', { class: 'note' }, el('strong', null, 'Pick a future date. '), 'The goal has to be at least a few hours away.'));
+      return;
+    }
+    cfg.horizonH = Math.min(cfg.horizonH, 24 * 180);
+    $('out').classList.add('busy');
+    const id = ++jobId;
+    if (worker) { worker.postMessage({ id: id, cfg: cfg }); return; }
+    setTimeout(() => {
+      try { render(M.plan(cfg)); } catch (e) { showError(e.message); }
+      $('out').classList.remove('busy');
+    }, 20);
+  }
+
+  load();
+  $('parseBtn').addEventListener('click', () => {
+    const f = parseBot($('paste').value);
+    const keys = Object.keys(f);
+    for (const k of keys) setVal(k, f[k]);
+    const labels = { shards: 'shards', prime: 'Prime', boost: 'server booster', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
+      res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount' };
+    const msg = $('parseMsg');
+    msg.className = 'msg ' + (keys.length ? 'ok' : 'bad');
+    msg.textContent = keys.length ? 'Updated: ' + keys.map(k => labels[k] || k).join(', ') + '.' : 'Nothing recognisable found: paste the bot’s message text.';
+    run();
+  });
+  $('calcBtn').addEventListener('click', run);
+  document.querySelectorAll('.rail input, .rail select, .objbar input, .objbar select').forEach(e => {
+    if (e.id !== 'paste') e.addEventListener('change', schedule);
+  });
+  for (const id of ['rUseAcc', 'rReinvest', 'rP', 'rR', 'rIB']) $(id).addEventListener('change', () => { clampRank('rR'); save(); renderRounds(readCfg()); });
+  run();
+})();
+</script>
 </body>
 </html>
