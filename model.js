@@ -305,6 +305,8 @@
     st.Wp = NEG; st.L = NEG; st.heldP = null; st.lastAsc = st.t;
     const pen = restartPenalty(cfg, st);
     if (pen > 0) st.t += pen;
+    // purchases after this ascend happen once the bank is rebuilt
+    if (log) { const a = log.ascends[log.ascends.length - 1]; a.tNext = st.t; a.restart = pen; }
     return lP;
   }
   function canAscend(cfg, st) {
@@ -462,7 +464,7 @@
     const rec = { t: st.t, key: key, lfrom: lfrom, lto: lto, lcost: lcost };
     log.buys.push(rec);
     const last = log.ascends[log.ascends.length - 1];
-    if (last && Math.abs(last.t - st.t) < 1e-6) last.buys.push(rec);
+    if (last && Math.abs((last.tNext !== undefined ? last.tNext : last.t) - st.t) < 1e-6) last.buys.push(rec);
   }
 
   // planner: greedy purchases and target choice, each scored by a base-policy rollout

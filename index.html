@@ -669,7 +669,7 @@ tbody tr:hover td { background: var(--sunk); }
         cmd('/claiminterest'), ', weekly and monthly if ready, ', cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), ', keep 50T in the bank, ', cmd('/prestige'), ', ', cmd('/ascend'),
         cfg.loan ? `. Then borrow ${fmtL(lnOf(reserve))}, ` : '. ', cfg.loan ? cmd('/claiminterest') : null, cfg.loan ? ' and pay it back.' : ' Then claim /daily and /claiminterest often until the bank is back above ' + fmtL(lnOf(reserve)) + '.',
         ` You get ${fmtIntL(a.lgain)} shards: Income Bonus ${fmtIBL(a.lib)}.`));
-      if (a.buys.length) ol.append(li('Right after that Ascend, buy: ', buysText(a.buys), '.'));
+      if (a.buys.length) ol.append(li(a.restart > 0 ? `About ${fmtDur(a.restart)} later, once the bank is rebuilt, buy: ` : 'Right after that Ascend, buy: ', buysText(a.buys), '.'));
     } else if (cfg.objective !== 'bo2') {
       const fa = L.finalAscend;
       ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtIntL(fa.lP)} (+${fmtIntL(fa.lgain)} shards).` : 'You can’t reach P1000 with 50T before the date: keep buying prestige.'));
@@ -785,7 +785,8 @@ tbody tr:hover td { background: var(--sunk); }
       const notes = el('td');
       const rw = L.rewards.filter(r => Math.abs(r.t - a.t) < 1e-6 && (r.kind === 'weekly' || r.kind === 'monthly')).map(r => r.kind);
       if (rw.length) notes.append('claim ' + rw.join(' + ') + ' first. ');
-      if (a.buys && a.buys.length) notes.append('then buy ' + buysText(a.buys) + '. ');
+      if (a.restart > 0) notes.append(`then about ${fmtDur(a.restart)} to rebuild ${fmtL(Math.log(M.reserveOf(cfg)))} without a loan. `);
+      if (a.buys && a.buys.length) notes.append((a.restart > 0 ? 'After that, buy ' : 'then buy ') + buysText(a.buys) + '. ');
       if (final) notes.append('on the goal date. ');
       body.append(el('tr', null,
         el('td', { class: 'n' }, NF(0).format(i + 1)), el('td', { class: 'n' }, fmtWhen(a.t)), el('td', { class: 'n' }, 'P' + fmtIntL(a.lP)),
