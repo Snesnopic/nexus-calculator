@@ -231,10 +231,11 @@ tbody tr:hover td { background: var(--sunk); }
             <div class="f"><label for="other">Other IB bonuses (+x)</label><input class="num" id="other" type="number" min="0" step="0.1"></div>
             <div class="f"><label for="rawCap">Hourly raw cap</label><input class="num" id="rawCap" type="text" inputmode="decimal"></div>
             <div class="f"><label for="minGap">Min hours between Ascends</label><input class="num" id="minGap" type="number" min="1" step="1"></div>
-            <div class="f"><label for="lookahead">Judge choices over (days)</label><input class="num" id="lookahead" type="number" min="3" max="60" step="1"></div>
+            <div class="f"><label for="lookahead">Decision window (days)</label><input class="num" id="lookahead" type="number" min="3" max="60" step="1"></div>
           </div>
+          <p class="hint">Decision window: at every Ascend, each shop purchase and target prestige is simulated this many days ahead, and the one with the highest Income Bonus at the end of the window wins.</p>
           <div class="checks">
-            <label class="check"><input id="loan" type="checkbox"> 0.9T loan after Ascend</label>
+            <label class="check"><input id="loan" type="checkbox"> Borrow <span id="loanAmt">0.89 T</span> after Ascend</label>
             <label class="check"><input id="floorShards" type="checkbox"> Shards round down</label>
             <label class="check"><input id="allowShop" type="checkbox"> Consider shard upgrades</label>
             <label class="check"><input id="allowBank" type="checkbox"> Consider bank levels</label>
@@ -307,7 +308,7 @@ tbody tr:hover td { background: var(--sunk); }
               <summary>Formulas and assumptions</summary>
               <ul>
                 <li><b>Income Bonus</b> = 1 + 0.5 (Prime) + server booster + other bonuses (these two together cap at 10) + unspent shards × 0.12 (0.10 without Prime) × (1 + 0.1 × Resonance). Matches /stats.</li>
-                <li><b>Bank</b>: raw per hour = min(balance × interest rate, 100B). A claim pays raw × bank bonus × (1 + 0.1 × Interest) × Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. Below about 0.89T of balance the raw drops, so the plan always keeps that much. Matches /bank.</li>
+                <li><b>Bank</b>: raw per hour = min(balance × interest rate, 100B). A claim pays raw × bank bonus × (1 + 0.1 × Interest) × Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance needed for the full raw is 100B ÷ interest rate (0.89T at 11.25%/hr); the plan always keeps that much, and it is also the loan you need after an Ascend to claim the stored hours at full rate. Without a loan the plan assumes you rebuild that balance from /daily and /primedaily by claiming often, and loses the hours it takes. Matches /bank.</li>
                 <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–16 cost 1.5T, 5T, 15T, 50T, 150T; the other levels are extrapolated (500T, 1.5Qa, 5Qa, 15Qa). Artifacts needed for upgrades are ignored.</li>
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
@@ -573,6 +574,7 @@ tbody tr:hover td { background: var(--sunk); }
     note.textContent = '';
     if (botIB !== null) note.append(Math.abs(botIB - Math.exp(lib)) < 0.015 ? 'Same Income Bonus as the bot.' : `The bot says ${NF(2).format(botIB)}x: check the fields.`);
     else if (cfg.R < 100) note.append(`At rank 100 your Income would be ${fmtInt((cfg.P + 1) * 100)}x.`);
+    $('loanAmt').textContent = fmtL(Math.log(M.reserveOf(cfg)));
     $('bankDerived').textContent = '';
     $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'),
       ' · keep at least ', el('b', null, fmtL(Math.log(M.reserveOf(cfg)))), ' in the bank for full interest');
@@ -661,7 +663,7 @@ tbody tr:hover td { background: var(--sunk); }
       const need = M.costToPD(Pa, d) + cfg.minBal;
       ol.append(li(`Next Ascend at P${fmtIntL(a.lP)} on ${fmtWhen(a.t)} (in ${fmtDur(a.t)}). You need ${fmtL(lnOf(need))} in total between prestige bought and bank. Order: `,
         cmd('/claiminterest'), ', weekly and monthly if ready, ', cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), ', keep 50T in the bank, ', cmd('/prestige'), ', ', cmd('/ascend'),
-        cfg.loan ? '. Then borrow 0.9T, ' : '. ', cfg.loan ? cmd('/claiminterest') : null, cfg.loan ? ' and pay it back.' : null,
+        cfg.loan ? `. Then borrow ${fmtL(lnOf(reserve))}, ` : '. ', cfg.loan ? cmd('/claiminterest') : null, cfg.loan ? ' and pay it back.' : ' Then claim /daily and /claiminterest often until the bank is back above ' + fmtL(lnOf(reserve)) + '.',
         ` You get ${fmtIntL(a.lgain)} shards: Income Bonus ${fmtIBL(a.lib)}.`));
       if (a.buys.length) ol.append(li('Right after that Ascend, buy: ', buysText(a.buys), '.'));
     } else if (cfg.objective !== 'bo2') {

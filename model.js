@@ -344,10 +344,11 @@
     return cfg.objective === 'income' ? lRate(cfg, fs) : lIB(cfg, fs);
   }
 
-  // cheap myopic shop rule used inside rollouts: buy while ln(IB) + one week of growth improves
-  function heuristicBuys(cfg, st) {
+  // cheap myopic shop rule used inside rollouts: buy while ln(IB) + growth until min(one week, horizon) improves
+  function heuristicBuys(cfg, st, T) {
     if (!cfg.allowShop) return;
-    const H = 168;
+    const H = Math.min(168, Math.max(0, T - st.t));
+    if (H <= 0) return;
     const P0 = pStar(cfg, st);
     for (let i = 0; i < 40; i++) {
       const cur = lIB(cfg, st) + growthAt(cfg, st, P0) * H;
@@ -366,7 +367,7 @@
   }
   // policy: decide() applies purchases and sets st.target; shouldAscend() gates each ascend
   const basePolicy = {
-    decide(cfg, st) { heuristicBuys(cfg, st); st.target = pStar(cfg, st); },
+    decide(cfg, st, T) { heuristicBuys(cfg, st, T); st.target = pStar(cfg, st); },
     shouldAscend: baseShouldAscend
   };
   function fixedPolicy(P) {
@@ -456,7 +457,7 @@
       decide(cfg, st, T, log) {
         if (budget.left <= 0) {
           const before = clone(st);
-          basePolicy.decide(cfg, st);
+          basePolicy.decide(cfg, st, T);
           if (log) {
             for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
               const was = k === 'disc' ? ln(before.disc) : before[k], now = k === 'disc' ? ln(st.disc) : st[k];
