@@ -48,7 +48,7 @@
       cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
       nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
       loan: true, floorShards: true, allowShop: true, allowBank: true,
-      minP: 1000, minBal: 50e12, minGap: 12, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
+      minP: 1000, minBal: 0, minGap: 12, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
       limitBits: Infinity,
       objective: 'ib', horizonH: 1400, round: 150, reinvest: false
     };

@@ -237,7 +237,6 @@ tbody tr:hover td { background: var(--sunk); }
           <p class="hint">Decision window: at every Ascend, each shop purchase and target prestige is simulated this many days ahead, and the one with the highest Income Bonus at the end of the window wins.</p>
           <div class="checks">
             <label class="check"><input id="loan" type="checkbox"> Borrow <span id="loanAmt">0.89 T</span> after Ascend</label>
-            <label class="check"><input id="floorShards" type="checkbox"> Shards round down</label>
             <label class="check"><input id="allowShop" type="checkbox"> Consider shard upgrades</label>
             <label class="check"><input id="allowBank" type="checkbox"> Consider bank levels</label>
             <label class="check"><input id="useRewards" type="checkbox"> Count daily, weekly, monthly</label>
@@ -315,7 +314,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
                 <li><b>Rewards</b>: daily and primedaily 100,000, weekly 1,000,000, monthly 10,000,000, each × Income × Income Bonus × (1 + 0.1 × Rewards). The plan holds weekly and monthly for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
-                <li><b>Ascend</b>: needs P ≥ 1000 and 50T in the bank; gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards. Rounding is not confirmed.</li>
+                <li><b>Ascend</b>: only needs P ≥ 1000 and burns the whole bank, so the plan spends it all on prestige right before. It gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards rounded down; rank doesn't count (confirmed: P1339 → 17, P2391 → 57, P2571 → 66). Since both the shards and the cost of prestige grow with P², every point buys about the same shards at any prestige: Ascending often wins, and <b>Min hours between Ascends</b> sets how often you are willing to act.</li>
                 <li><b>Purchase timing</b>: Resonance and Interest raise income at once, so the plan buys them as soon as it picks them. Discount right after an Ascend, before you buy prestige. Yield only affects the shards of the next Ascend, so its shards stay unspent (and keep raising your Income Bonus) until right before <code>/ascend</code>.</li>
                 <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5). Confirmed linear: Interest Lv3 costs 15. Resonance Lv1 is confirmed with and without Prime (0.12 → 0.132x, 0.10 → 0.11x); that higher levels keep adding +10% each is an assumption.</li>
                 <li><b>Why far projections explode</b>: with linear costs, the levels you can afford grow with the square root of your shards, so each Ascend multiplies the next one. Separately, daily, weekly and monthly pay Income × IB: once prestige is in the hundreds of thousands they outgrow the bank, and spending them on prestige before an Ascend turns them into shards with the square of prestige. Either loop makes the number of digits, not the number itself, grow every day.</li>
@@ -364,7 +363,7 @@ tbody tr:hover td { background: var(--sunk); }
   const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'claimEvery', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
     'other', 'minGap', 'lookahead', 'round', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'paste'];
-  const CHK_IDS = ['prime', 'boost', 'loan', 'floorShards', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
+  const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
   const SERIES = [
     { name: 'Recommended plan', short: 'Plan', color: 'var(--s1)' },
@@ -390,7 +389,7 @@ tbody tr:hover td { background: var(--sunk); }
     nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 12, lookahead: 14, round: 150,
     rP: 1000, rR: 100, rIB: 11.74,
     bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
-    prime: true, boost: true, loan: true, floorShards: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
+    prime: true, boost: true, loan: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
     rUseAcc: true, rReinvest: false
   };
 
@@ -502,7 +501,7 @@ tbody tr:hover td { background: var(--sunk); }
     const raw = parsePts($('rawCap').value);
     c.rawCap = isFinite(raw) && raw > 0 ? raw : 1e11;
     c.nextIn = { daily: num('nDaily', 24), prime: num('nPrime', 24), weekly: num('nWeekly', 168), monthly: num('nMonthly', 720) };
-    c.loan = $('loan').checked; c.floorShards = $('floorShards').checked;
+    c.loan = $('loan').checked;
     c.allowShop = $('allowShop').checked; c.allowBank = $('allowBank').checked; c.useRewards = $('useRewards').checked;
     c.minGap = Math.max(1, num('minGap', 12));
     c.lookahead = Math.max(3, num('lookahead', 14)) * 24;
@@ -673,10 +672,11 @@ tbody tr:hover td { background: var(--sunk); }
     const a = L.ascends[0];
     if (a) {
       const Pa = Math.round(Math.exp(a.lP));
-      const need = M.costToPD(Pa, d) + cfg.minBal;
-      ol.append(li(`Next Ascend at P${fmtIntL(a.lP)} on ${fmtWhen(a.t)} (in ${fmtDur(a.t)}). You need ${fmtL(lnOf(need))} in total between prestige bought and bank. Order: `,
-        cmd('/claiminterest'), ', weekly and monthly if ready, ', cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), ', keep 50T in the bank, ', cmd('/prestige'), ', ',
-        yield0.length ? 'buy ' + buysText(yield0) + ' in /shards (it only boosts this Ascend, so keep those shards until now), ' : null, cmd('/ascend'),
+      const need = M.costToPD(Pa, d);
+      ol.append(li(`Next Ascend at P${fmtIntL(a.lP)} ${a.t < 0.05 ? 'right now' : 'on ' + fmtWhen(a.t) + ' (in ' + fmtDur(a.t) + ')'}, about ${fmtL(lnOf(need))} of prestige in total. Order: `,
+        cmd('/claiminterest'), ', weekly and monthly if ready, ',
+        yield0.length ? 'buy ' + buysText(yield0) + ' in /shards (it only boosts this Ascend, so keep those shards until now), ' : null,
+        cmd('/maxprestige'), ' (the whole bank is burned, so spend all of it), ', cmd('/ascend'),
         cfg.loan ? `. Then borrow ${fmtL(lnOf(reserve))}, ` : '. ', cfg.loan ? cmd('/claiminterest') : null, cfg.loan ? ' and pay it back.' : ' Then claim /daily and /claiminterest often until the bank is back above ' + fmtL(lnOf(reserve)) + '.',
         ` You get ${fmtIntL(a.lgain)} shards: Income Bonus ${fmtIBL(a.lib)}.`));
       const after = nowBuys(a.buys), nextY = yieldBuys(a.buys);
@@ -684,7 +684,7 @@ tbody tr:hover td { background: var(--sunk); }
       if (nextY.length) ol.append(li('Right before the Ascend after that, buy ', buysText(nextY), '.'));
     } else if (cfg.objective !== 'bo2') {
       const fa = L.finalAscend;
-      ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtIntL(fa.lP)} (+${fmtIntL(fa.lgain)} shards).` : 'You can’t reach P1000 with 50T before the date: keep buying prestige.'));
+      ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtIntL(fa.lP)} (+${fmtIntL(fa.lgain)} shards).` : 'You can’t reach P1000 before the date: keep buying prestige.'));
     }
     if (cfg.objective === 'bo2' && L.final) {
       ol.append(li(`On ${fmtWhen(cfg.horizonH)}, start the run at R100 of your highest prestige: Income ${fmtIntL(L.final.lpm)}x, Income Bonus ${fmtIBL(L.final.lib)}. Up to round ${cfg.round} it pays about ${fmtL(L.final.lreward)}.`));
