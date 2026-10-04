@@ -315,7 +315,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
                 <li><b>Rewards</b>: daily and primedaily 100,000, weekly 1,000,000, monthly 10,000,000, each × Income × Income Bonus × (1 + 0.1 × Rewards). The plan holds weekly and monthly for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
                 <li><b>Ascend</b>: only needs P ≥ 1000 and burns the whole bank, so the plan spends it all on prestige right before. It gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards rounded down; rank doesn't count (confirmed: P1339 → 17, P2391 → 57, P2571 → 66). Since both the shards and the cost of prestige grow with P², every point buys about the same shards at any prestige: Ascending often wins, and <b>Min hours between Ascends</b> sets how often you are willing to act.</li>
-                <li><b>Purchase timing</b>: Resonance and Interest raise income at once, so the plan buys them as soon as it picks them. Discount right after an Ascend, before you buy prestige. Yield only affects the shards of the next Ascend, so its shards stay unspent (and keep raising your Income Bonus) until right before <code>/ascend</code>.</li>
+                <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Resonance and Interest raise income at once and are bought as soon as the plan picks them. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus.</li>
                 <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5). Confirmed linear: Interest Lv3 costs 15. Resonance Lv1 is confirmed with and without Prime (0.12 → 0.132x, 0.10 → 0.11x); that higher levels keep adding +10% each is an assumption.</li>
                 <li><b>Why far projections explode</b>: with linear costs, the levels you can afford grow with the square root of your shards, so each Ascend multiplies the next one. Separately, daily, weekly and monthly pay Income × IB: once prestige is in the hundreds of thousands they outgrow the bank, and spending them on prestige before an Ascend turns them into shards with the square of prestige. Either loop makes the number of digits, not the number itself, grow every day.</li>
                 <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
@@ -567,8 +567,11 @@ tbody tr:hover td { background: var(--sunk); }
     return `${NAMES[b.key]} ${fmtIntL(b.lfrom)}→${fmtIntL(b.lto)}` + (b.lcost === NEG ? '' : ` (${fmtIntL(b.lcost)} shards)`);
   }
   const buysText = list => mergeBuys(list).map(buyText).join(', ');
-  // Yield is bought right before the Ascend it boosts; everything else as soon as it is decided
-  const nowBuys = list => list.filter(b => b.key !== 'yld');
+  // when each upgrade is bought: Yield right before the Ascend it boosts, Discount and Rewards right before the
+  // next prestige purchase (reward claim or Ascend), everything else as soon as it is decided
+  const DEFER = { yld: 'ascend', disc: 'prestige', rew: 'prestige' };
+  const nowBuys = list => list.filter(b => !DEFER[b.key]);
+  const prestigeBuys = list => list.filter(b => DEFER[b.key] === 'prestige');
   const yieldBuys = list => list.filter(b => b.key === 'yld');
 
   // ---- account readout ----
@@ -632,55 +635,64 @@ tbody tr:hover td { background: var(--sunk); }
   function renderActions(res) {
     const cfg = res.cfg, L = res.optimal.log;
     const ol = $('actions'); ol.textContent = '';
-    const buys0all = L.buys.filter(b => b.t < 1e-6);
-    const buys0 = nowBuys(buys0all), yield0 = yieldBuys(buys0all);
+    const buys0 = L.buys.filter(b => b.t < 1e-6);
+    const now0 = nowBuys(buys0), pre0 = prestigeBuys(buys0), yield0 = yieldBuys(buys0);
     let disc = cfg.disc;
-    for (const b of buys0) if (b.key === 'disc') disc = Math.round(Math.exp(b.lto));
+    for (const b of pre0) if (b.key === 'disc') disc = Math.round(Math.exp(b.lto));
     const d = 1 - 0.05 * disc;
     const reserve = M.reserveOf(cfg);
     const W0 = M.cumPR(cfg.P, cfg.R, d) + cfg.bal;
     const tgt = L.targets.length && isFinite(L.targets[0].target) ? Math.round(Math.exp(L.targets[0].target)) : Infinity;
     const Q = M.pAffD(W0 - reserve, d);
+    const top = Math.min(Q, tgt), Pnow = top - 1;
+    const a = L.ascends[0];
+    const ascIn = a ? a.t : Infinity;
+    // income bonus once the upgrades decided now are paid (Yield excluded: it waits for the Ascend)
+    const stNow = M.initState(cfg, 0), stPaid = M.initState(cfg, 0);
+    for (const b of buys0) {
+      if (b.key === 'bank' || b.key === 'yld') continue;
+      const lv = b.key === 'disc' ? Math.round(Math.exp(b.lto)) : b.lto;
+      stPaid[b.key] = lv;
+      if (b.lcost !== NEG) stPaid.S = M.lSub(stPaid.S, b.lcost);
+      if (now0.includes(b)) { stNow[b.key] = lv; if (b.lcost !== NEG) stNow.S = M.lSub(stNow.S, b.lcost); }
+    }
 
     const lost = cfg.claimEvery > cfg.storage;
     ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), `. Then claim at least every ${NF(0).format(cfg.storage)} h: at bank Lv${cfg.bankLv} the storage is full after ${NF(0).format(cfg.storage)} h and stops filling.`,
       lost ? ` You said you claim every ${NF(0).format(cfg.claimEvery)} h, so ${NF(0).format((1 - cfg.storage / cfg.claimEvery) * 100)}% of the interest is lost; the plan already counts that, and bank levels (+4 h each) are worth more to you.` : ''));
-    if (buys0.length) {
-      const st = M.initState(cfg, 0);
-      for (const b of buys0) if (b.key !== 'bank') {
-        if (b.key === 'disc') st.disc = Math.round(Math.exp(b.lto)); else st[b.key] = b.lto;
-        if (b.lcost !== NEG) st.S = M.lSub(st.S, b.lcost);
-      }
-      ol.append(li('Buy in the shard shop: ', buysText(buys0), '. Your Income Bonus drops to ', fmtIBL(M.lIB(cfg, st)), ', and the next Ascends pay it back.'));
-    } else if (cfg.allowShop && !yield0.length) {
-      ol.append(li('Don’t buy shard upgrades yet: none of them pays off within ' + Math.round(cfg.lookahead / 24) + ' days.'));
+    if (now0.length) ol.append(li('Buy in the shard shop now: ', buysText(now0), '. Your Income Bonus becomes ', fmtIBL(M.lIB(cfg, stNow)), ', and the next Ascends pay it back.'));
+    else if (cfg.allowShop && !pre0.length && !yield0.length) ol.append(li('Don’t buy shard upgrades yet: none of them pays off within ' + Math.round(cfg.lookahead / 24) + ' days.'));
+
+    const dailyIn = cfg.useRewards ? Math.max(0, Math.min(cfg.nextIn.daily, cfg.prime ? cfg.nextIn.prime : Infinity)) : Infinity;
+    const canRaise = Pnow > cfg.P || (Pnow === cfg.P && cfg.R < 100);
+    const preAtDaily = dailyIn < ascIn - 1e-6;
+    if (preAtDaily) {
+      const soon = dailyIn < 0.05;
+      const parts = [];
+      if (!soon) parts.push('Until then, keep your points in the bank: above ', fmtL(lnOf(reserve)), ' a bigger balance earns no more interest, and prestige only pays off when you claim rewards or Ascend. ');
+      parts.push(soon ? 'Now: ' : `At your next /daily (${fmtWhen(dailyIn)}, in ${fmtDur(dailyIn)}): `);
+      if (pre0.length) parts.push('buy ', buysText(pre0), ' in /shards, then ');
+      if (canRaise) parts.push(cmd('/prestigeupto ' + Pnow), ' and ', cmd('/rankupmax'), ` (P${fmtInt(Pnow)} R100, Income ${fmtInt(100 * top)}x${soon ? '' : ', higher if you have earned more by then'}), then `);
+      parts.push('claim ', cmd('/daily'));
+      if (cfg.prime) parts.push(' and ', cmd('/primedaily'));
+      parts.push(`, worth about ${fmtL(Math.log(1e5) + Math.log(100 * Math.max(1, top)) + M.lIB(cfg, stPaid) + Math.log(1 + 0.1 * Math.round(Math.exp(stPaid.rew === NEG ? NEG : stPaid.rew))))} each. Weekly and monthly wait for the Ascend, when prestige is highest.`);
+      ol.append(li(...parts));
     }
-    const top = Math.min(Q, tgt);
-    const Pnow = top - 1;
-    if (Pnow > cfg.P || (Pnow === cfg.P && cfg.R < 100)) {
-      const left = W0 - M.cumPR(Pnow, 100, d);
-      ol.append(li('Buy prestige: ', cmd('/prestigeupto ' + Pnow), ' then ', cmd('/rankupmax'), `. You end at P${fmtInt(Pnow)} R100 with Income ${fmtInt(100 * top)}x (it would be ${fmtInt(Pnow + 1)}x at R1). About ${fmtL(lnOf(left))} stays in the bank: don’t go below ${fmtL(lnOf(reserve))} or interest drops.`));
-    } else if (cfg.R < 100 && Q >= cfg.P + 1) {
-      ol.append(li('Max your rank with ', cmd('/rankupmax'), `: Income goes from ${fmtInt((cfg.P + 1) * cfg.R)}x to ${fmtInt((cfg.P + 1) * 100)}x.`));
-    }
-    if (cfg.useRewards) {
-      const lpm = Math.log(100 * Math.max(1, top));
-      const extra = cfg.prime ? [' and ', cmd('/primedaily')] : [];
-      ol.append(li('Claim ', cmd('/daily'), ...extra, ' only after raising prestige and rank: right now each is worth about ', fmtL(Math.log(1e5 * (1 + 0.1 * cfg.rew)) + lpm + res.now.lib),
-        '. Keep weekly and monthly for right before an Ascend, when prestige is highest.'));
-    }
-    const a = L.ascends[0];
     if (a) {
       const Pa = Math.round(Math.exp(a.lP));
-      const need = M.costToPD(Pa, d);
-      ol.append(li(`Next Ascend at P${fmtIntL(a.lP)} ${a.t < 0.05 ? 'right now' : 'on ' + fmtWhen(a.t) + ' (in ' + fmtDur(a.t) + ')'}, about ${fmtL(lnOf(need))} of prestige in total. Order: `,
-        cmd('/claiminterest'), ', weekly and monthly if ready, ',
-        yield0.length ? 'buy ' + buysText(yield0) + ' in /shards (it only boosts this Ascend, so keep those shards until now), ' : null,
-        cmd('/maxprestige'), ' (the whole bank is burned, so spend all of it), ', cmd('/ascend'),
-        cfg.loan ? `. Then borrow ${fmtL(lnOf(reserve))}, ` : '. ', cfg.loan ? cmd('/claiminterest') : null, cfg.loan ? ' and pay it back.' : ' Then claim /daily and /claiminterest often until the bank is back above ' + fmtL(lnOf(reserve)) + '.',
-        ` You get ${fmtIntL(a.lgain)} shards: Income Bonus ${fmtIBL(a.lib)}.`));
-      const after = nowBuys(a.buys), nextY = yieldBuys(a.buys);
+      const parts = [`Next Ascend at P${fmtIntL(a.lP)} ${a.t < 0.05 ? 'right now' : 'on ' + fmtWhen(a.t) + ' (in ' + fmtDur(a.t) + ')'}, about ${fmtL(lnOf(M.costToPD(Pa, d)))} of prestige in total. Order: `,
+        cmd('/claiminterest'), ', '];
+      if (!preAtDaily && pre0.length) parts.push('buy ', buysText(pre0), ', ');
+      parts.push(cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), ', claim weekly and monthly if ready, ');
+      if (yield0.length) parts.push('buy ', buysText(yield0), ' only now, since it just boosts this Ascend, ');
+      parts.push(cmd('/maxprestige'), ' (the whole bank is burned, so spend all of it), ', cmd('/ascend'));
+      if (cfg.loan) parts.push(`. Then borrow ${fmtL(lnOf(reserve))}, `, cmd('/claiminterest'), ' and pay it back.');
+      else parts.push(`. Then claim /daily and /claiminterest often until the bank is back above ${fmtL(lnOf(reserve))}.`);
+      parts.push(` You get ${fmtIntL(a.lgain)} shards: Income Bonus ${fmtIBL(a.lib)}.`);
+      ol.append(li(...parts));
+      const after = nowBuys(a.buys), preNext = prestigeBuys(a.buys), nextY = yieldBuys(a.buys);
       if (after.length) ol.append(li(a.restart > 0 ? `About ${fmtDur(a.restart)} later, once the bank is rebuilt, buy: ` : 'Right after that Ascend, buy: ', buysText(after), '.'));
+      if (preNext.length) ol.append(li('The next time you buy prestige after that (your next /daily or Ascend), first buy ', buysText(preNext), '.'));
       if (nextY.length) ol.append(li('Right before the Ascend after that, buy ', buysText(nextY), '.'));
     } else if (cfg.objective !== 'bo2') {
       const fa = L.finalAscend;
@@ -800,8 +812,9 @@ tbody tr:hover td { background: var(--sunk); }
       if (a.restart > 0) notes.append(`then about ${fmtDur(a.restart)} to rebuild ${fmtL(Math.log(M.reserveOf(cfg)))} without a loan. `);
       const ybefore = yieldBuys(i === 0 ? L.buys.filter(b => b.t < 1e-6) : (L.ascends[i - 1] ? L.ascends[i - 1].buys : []));
       if (ybefore.length) notes.prepend('right before: buy ' + buysText(ybefore) + '. ');
-      const after = nowBuys(a.buys || []);
+      const after = nowBuys(a.buys || []), preNext = prestigeBuys(a.buys || []);
       if (after.length) notes.append((a.restart > 0 ? 'After that, buy ' : 'then buy ') + buysText(after) + '. ');
+      if (preNext.length) notes.append('Next time you buy prestige, first buy ' + buysText(preNext) + '. ');
       if (final) notes.append('on the goal date. ');
       body.append(el('tr', null,
         el('td', { class: 'n' }, NF(0).format(i + 1)), el('td', { class: 'n' }, fmtWhen(a.t)), el('td', { class: 'n' }, 'P' + fmtIntL(a.lP)),

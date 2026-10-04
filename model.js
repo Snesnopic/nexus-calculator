@@ -142,17 +142,22 @@
     const lN = lB - lAdd(0.5 * lAdd(2 * lA, lB), lA) - LN2;
     return lN >= 0 ? lN : NEG;
   }
-  // Yield only matters at the Ascend, so it is paid right before it: its shards keep boosting IB until then
+  // upgrades are paid when they start to matter, so their shards keep boosting IB until then:
+  // Yield right before the Ascend, Discount and Rewards right before the next prestige purchase (reward claim or Ascend)
   function spend(st, key, lc) {
     if (key === 'yld') st.yDebt = lAdd(st.yDebt, lc);
+    else if (key === 'disc' || key === 'rew') st.pDebt = lAdd(st.pDebt, lc);
     else st.S = lSub(st.S, lc);
   }
-  const spendable = st => lSub(st.S, st.yDebt);
-  // decisions treat reserved Yield shards as already spent, so deferring the payment never makes Yield look free
+  const spendable = st => lSub(lSub(st.S, st.yDebt), st.pDebt);
+  function payPrestigeDebt(st) {
+    if (st.pDebt !== NEG) { st.S = lSub(st.S, st.pDebt); st.pDebt = NEG; }
+  }
+  // decisions treat reserved shards as already spent, so deferring the payment never makes an upgrade look free
   function paidView(st) {
-    if (st.yDebt === NEG) return st;
+    if (st.yDebt === NEG && st.pDebt === NEG) return st;
     const v = Object.assign({}, st);
-    v.S = spendable(st); v.yDebt = NEG;
+    v.S = spendable(st); v.yDebt = NEG; v.pDebt = NEG;
     return v;
   }
   function applyBuy(cfg, st, opt) {
@@ -161,7 +166,7 @@
       const n = Math.round(Math.exp(opt.n));
       let c = 0;
       for (let i = 0; i < n; i++) c += 5 * (st.disc + i + 1);
-      st.disc += n; st.S = lSub(st.S, Math.log(c));
+      st.disc += n; spend(st, 'disc', Math.log(c));
       settleHeld(cfg, st);
       return Math.log(c);
     }
@@ -227,7 +232,7 @@
   function initState(cfg, t0) {
     const st = {
       t: t0 || 0, S: ln(cfg.shards), res: ln(cfg.res), yld: ln(cfg.yld), intr: ln(cfg.intr), rew: ln(cfg.rew), disc: cfg.disc,
-      bankLv: cfg.bankLv, Wp: NEG, L: NEG, target: HOLD, bankNeed: NEG, lastAsc: -Infinity, yDebt: NEG,
+      bankLv: cfg.bankLv, Wp: NEG, L: NEG, target: HOLD, bankNeed: NEG, lastAsc: -Infinity, yDebt: NEG, pDebt: NEG,
       next: {}, heldP: cfg.P, heldR: cfg.R
     };
     for (const k of KINDS) st.next[k] = st.t + Math.max(0, cfg.nextIn[k]);
@@ -267,6 +272,8 @@
   // weekly and monthly wait (up to deferFrac of their cooldown) for the next ascend, where prestige peaks
   function claimRewards(cfg, st, log, atAscend) {
     if (!cfg.useRewards) return;
+    const dueNow = k => (atAscend ? st.next[k] : st.next[k] + deferOf(cfg, st, k)) <= st.t + 1e-9;
+    if (KINDS.some(k => (k !== 'prime' || cfg.prime) && dueNow(k))) payPrestigeDebt(st);
     const lpm = lPm(st.Wp, dOf(st));
     const lib = lIB(cfg, st);
     for (const k of KINDS) {
@@ -303,6 +310,7 @@
     const lW = lAdd(st.Wp, st.L);
     const lP = Math.max(st.target === HOLD ? NEG : st.target, lPAff(lSub(lW, Math.log(cfg.minBal)), d));
     if (st.yDebt !== NEG) { st.S = lSub(st.S, st.yDebt); st.yDebt = NEG; }
+    payPrestigeDebt(st);
     const gain = lShardsAt(cfg, st, lP);
     st.S = lAdd(st.S, gain);
     if (log) log.ascends.push({ t: st.t, lP: lP, lgain: gain, lS: st.S, lib: lIB(cfg, st), lrate: lRate(cfg, st), buys: [] });
@@ -340,6 +348,7 @@
   // ln of the final value for the chosen objective
   function finalValue(cfg, st, log) {
     if (cfg.objective === 'bo2') {
+      payPrestigeDebt(st);
       const lib = lIB(cfg, st);
       const d = dOf(st);
       let lWp = lAdd(st.Wp, lSub(st.L, lReserve(cfg)));
@@ -358,7 +367,7 @@
     if (canAscend(cfg, fs)) {
       fs.target = HOLD;
       const lP = doAscend(cfg, fs, null);
-      if (log) log.finalAscend = { t: fs.t, lP: lP, lgain: lSub(fs.S, lSub(st.S, st.yDebt)), lS: fs.S, lib: lIB(cfg, fs), lrate: lRate(cfg, fs) };
+      if (log) log.finalAscend = { t: fs.t, lP: lP, lgain: lSub(fs.S, spendable(st)), lS: fs.S, lib: lIB(cfg, fs), lrate: lRate(cfg, fs) };
     }
     if (log) log.final = { lib: lIB(cfg, fs), lrate: lRate(cfg, fs), lS: fs.S };
     return cfg.objective === 'income' ? lRate(cfg, fs) : lIB(cfg, fs);
