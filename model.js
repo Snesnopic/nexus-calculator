@@ -49,7 +49,7 @@
       nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
       loan: true, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 50e12, minGap: 12, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
-      limitBits: Infinity, costGrowth: 'linear',
+      limitBits: Infinity,
       objective: 'ib', horizonH: 1400, round: 150, reinvest: false
     };
   }
@@ -117,20 +117,14 @@
 
   // ---- shard shop ----
   const BASE = { res: 5, yld: 5, intr: 5, rew: 3, disc: 5 };
-  // next level costs base * (L+1) when linear, base * 2^L when doubling (both give 5, 10 for the first two)
-  function lUpgradeCost(st, key, cfg) {
+  // next level costs base * (L+1) (Interest Lv3 = 15 confirms it)
+  function lUpgradeCost(st, key) {
     if (key === 'disc') return st.disc >= 5 ? Infinity : Math.log(5 * (st.disc + 1));
-    if (cfg && cfg.costGrowth === 'double') return Math.log(BASE[key]) + Math.exp(st[key]) * LN2;
     return Math.log(BASE[key]) + lAdd(st[key], 0);
   }
-  // ln of the number of levels affordable with ln-budget lQ: base * (n L + n(n+1)/2) <= Q, or base * 2^L (2^n - 1) <= Q
-  function lLevelsWithin(st, key, lQ, cfg) {
+  // ln of the number of levels affordable with ln-budget lQ: base * (n L + n(n+1)/2) <= Q
+  function lLevelsWithin(st, key, lQ) {
     if (lQ === NEG) return NEG;
-    if (cfg && cfg.costGrowth === 'double' && key !== 'disc') {
-      const x = lQ - Math.log(BASE[key]) - Math.exp(st[key]) * LN2;
-      const n = x > 30 ? Math.floor(x / LN2) : Math.floor(Math.log2(Math.exp(x) + 1) + 1e-12);
-      return n >= 1 ? Math.log(n) : NEG;
-    }
     if (key === 'disc') {
       let n = 0, c = 0;
       while (st.disc + n < 5 && c + 5 * (st.disc + n + 1) <= Math.exp(lQ) * (1 + 1e-12)) { c += 5 * (st.disc + n + 1); n++; }
@@ -148,6 +142,19 @@
     const lN = lB - lAdd(0.5 * lAdd(2 * lA, lB), lA) - LN2;
     return lN >= 0 ? lN : NEG;
   }
+  // Yield only matters at the Ascend, so it is paid right before it: its shards keep boosting IB until then
+  function spend(st, key, lc) {
+    if (key === 'yld') st.yDebt = lAdd(st.yDebt, lc);
+    else st.S = lSub(st.S, lc);
+  }
+  const spendable = st => lSub(st.S, st.yDebt);
+  // decisions treat reserved Yield shards as already spent, so deferring the payment never makes Yield look free
+  function paidView(st) {
+    if (st.yDebt === NEG) return st;
+    const v = Object.assign({}, st);
+    v.S = spendable(st); v.yDebt = NEG;
+    return v;
+  }
   function applyBuy(cfg, st, opt) {
     if (opt.key === 'bank') { st.bankNeed = Math.log(cfg.bankCosts[st.bankLv + 1]); return st.bankNeed; }
     if (opt.key === 'disc') {
@@ -159,15 +166,8 @@
       return Math.log(c);
     }
     const lL = st[opt.key], lN = opt.n;
-    if (cfg.costGrowth === 'double') {
-      const L = Math.round(Math.exp(lL)), n = Math.round(Math.exp(lN));
-      const lc = Math.log(BASE[opt.key]) + (L + n) * LN2 + Math.log1p(-Math.pow(2, -n));
-      st.S = lSub(st.S, lc);
-      st[opt.key] = ln(L + n);
-      return lc;
-    }
     const lCost = Math.log(BASE[opt.key]) + lAdd(lN + lL, lN + lAdd(lN, 0) - LN2);
-    st.S = lSub(st.S, lCost);
+    spend(st, opt.key, lCost);
     st[opt.key] = lAdd(lL, lN);
     return lCost;
   }
@@ -227,7 +227,7 @@
   function initState(cfg, t0) {
     const st = {
       t: t0 || 0, S: ln(cfg.shards), res: ln(cfg.res), yld: ln(cfg.yld), intr: ln(cfg.intr), rew: ln(cfg.rew), disc: cfg.disc,
-      bankLv: cfg.bankLv, Wp: NEG, L: NEG, target: HOLD, bankNeed: NEG, lastAsc: -Infinity,
+      bankLv: cfg.bankLv, Wp: NEG, L: NEG, target: HOLD, bankNeed: NEG, lastAsc: -Infinity, yDebt: NEG,
       next: {}, heldP: cfg.P, heldR: cfg.R
     };
     for (const k of KINDS) st.next[k] = st.t + Math.max(0, cfg.nextIn[k]);
@@ -302,6 +302,7 @@
     const d = dOf(st);
     const lW = lAdd(st.Wp, st.L);
     const lP = Math.max(st.target === HOLD ? NEG : st.target, lPAff(lSub(lW, Math.log(cfg.minBal)), d));
+    if (st.yDebt !== NEG) { st.S = lSub(st.S, st.yDebt); st.yDebt = NEG; }
     const gain = lShardsAt(cfg, st, lP);
     st.S = lAdd(st.S, gain);
     if (log) log.ascends.push({ t: st.t, lP: lP, lgain: gain, lS: st.S, lib: lIB(cfg, st), lrate: lRate(cfg, st), buys: [] });
@@ -357,7 +358,7 @@
     if (canAscend(cfg, fs)) {
       fs.target = HOLD;
       const lP = doAscend(cfg, fs, null);
-      if (log) log.finalAscend = { t: fs.t, lP: lP, lgain: lSub(fs.S, st.S), lS: fs.S, lib: lIB(cfg, fs), lrate: lRate(cfg, fs) };
+      if (log) log.finalAscend = { t: fs.t, lP: lP, lgain: lSub(fs.S, lSub(st.S, st.yDebt)), lS: fs.S, lib: lIB(cfg, fs), lrate: lRate(cfg, fs) };
     }
     if (log) log.final = { lib: lIB(cfg, fs), lrate: lRate(cfg, fs), lS: fs.S };
     return cfg.objective === 'income' ? lRate(cfg, fs) : lIB(cfg, fs);
@@ -368,16 +369,17 @@
     if (!cfg.allowShop) return;
     const H = Math.min(168, Math.max(0, T - st.t));
     if (H <= 0) return;
-    const P0 = pStar(cfg, st);
+    const P0 = pStar(cfg, paidView(st));
+    const score = x => { const v = paidView(x); return lIB(cfg, v) + growthAt(cfg, v, P0) * H; };
     for (let i = 0; i < 40; i++) {
-      const cur = lIB(cfg, st) + growthAt(cfg, st, P0) * H;
+      const cur = score(st);
       let best = null, bv = cur + 1e-6;
       for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
-        if (lUpgradeCost(st, k, cfg) > st.S) continue;
-        const n = Math.max(0, lLevelsWithin(st, k, st.S + Math.log(0.02), cfg));
+        if (lUpgradeCost(st, k) > spendable(st)) continue;
+        const n = Math.max(0, lLevelsWithin(st, k, spendable(st) + Math.log(0.02)));
         const s = clone(st);
         applyBuy(cfg, s, { key: k, n: n });
-        const v = lIB(cfg, s) + growthAt(cfg, s, P0) * H;
+        const v = score(s);
         if (v > bv) { bv = v; best = { key: k, n: n }; }
       }
       if (!best) break;
@@ -386,7 +388,7 @@
   }
   // policy: decide() applies purchases and sets st.target; shouldAscend() gates each ascend
   const basePolicy = {
-    decide(cfg, st, T) { heuristicBuys(cfg, st, T); st.target = pStar(cfg, st); },
+    decide(cfg, st, T) { heuristicBuys(cfg, st, T); st.target = pStar(cfg, paidView(st)); },
     shouldAscend: baseShouldAscend
   };
   function fixedPolicy(P) {
@@ -446,8 +448,9 @@
     const out = [];
     if (cfg.allowShop) {
       for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
-        if (lUpgradeCost(st, k, cfg) > st.S) continue;
-        const steps = new Set([0, lLevelsWithin(st, k, st.S + Math.log(0.04), cfg), lLevelsWithin(st, k, st.S + Math.log(0.15), cfg)]);
+        if (lUpgradeCost(st, k) > spendable(st)) continue;
+        const sp = spendable(st);
+        const steps = new Set([0, lLevelsWithin(st, k, sp + Math.log(0.04)), lLevelsWithin(st, k, sp + Math.log(0.15))]);
         for (const n of steps) if (n >= 0) out.push({ key: k, n: n });
       }
     }
@@ -459,7 +462,7 @@
     const s = clone(st);
     const Te = Math.min(T, st.t + cfg.lookahead);
     const c = Te < T ? (cfg._ibCfg || (cfg._ibCfg = Object.assign({}, cfg, { objective: 'ib' }))) : cfg;
-    s.target = targetOverride !== undefined ? targetOverride : pStar(cfg, s);
+    s.target = targetOverride !== undefined ? targetOverride : pStar(cfg, paidView(s));
     return run(c, s, Te, basePolicy, null, true);
   }
 
@@ -506,7 +509,7 @@
           if (log) logBuy(log, st, best.key, lfrom, lto, lcost);
           if (best.key === 'bank') break;
         }
-        const ps = pStar(cfg, st);
+        const ps = pStar(cfg, paidView(st));
         const lW = lAdd(st.Wp, st.L);
         const cands = new Set([HOLD]);
         for (const m of [0.55, 0.75, 0.9, 1, 1.12, 1.3, 1.6, 2, 2.6]) cands.add(snapTarget(cfg, st, ps + Math.log(m)));
