@@ -49,7 +49,7 @@
       nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
       loan: true, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 0, minGap: 12, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
-      limitBits: Infinity,
+      limitBits: Infinity, maxClicks: 100,
       objective: 'ib', horizonH: 1400, round: 150, reinvest: false
     };
   }
@@ -104,6 +104,7 @@
     return Math.log(P);
   }
   function lRho(cfg, st) {
+    if (!cfg.useRewards) return NEG;
     const b = cfg.rewBase, c = cfg.cooldown;
     let r = b.daily / c.daily + b.weekly / c.weekly + b.monthly / c.monthly;
     if (cfg.prime) r += b.prime / c.prime;
@@ -380,12 +381,13 @@
     if (H <= 0) return;
     const P0 = pStar(cfg, paidView(st));
     const score = x => { const v = paidView(x); return lIB(cfg, v) + growthAt(cfg, v, P0) * H; };
-    for (let i = 0; i < 40; i++) {
+    let clicks = cfg.maxClicks;
+    for (let i = 0; i < 40 && clicks >= 1; i++) {
       const cur = score(st);
       let best = null, bv = cur + 1e-6;
       for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
         if (lUpgradeCost(st, k) > spendable(st)) continue;
-        const n = Math.max(0, lLevelsWithin(st, k, spendable(st) + Math.log(0.02)));
+        const n = Math.min(Math.log(clicks), Math.max(0, lLevelsWithin(st, k, spendable(st) + Math.log(0.02))));
         const s = clone(st);
         applyBuy(cfg, s, { key: k, n: n });
         const v = score(s);
@@ -393,6 +395,7 @@
       }
       if (!best) break;
       applyBuy(cfg, st, best);
+      clicks -= Math.round(Math.exp(best.n));
     }
   }
   // policy: decide() applies purchases and sets st.target; shouldAscend() gates each ascend
@@ -453,13 +456,15 @@
 
   function newLog() { return { ascends: [], rewards: [], bank: [], buys: [], targets: [] }; }
 
-  function buyOptions(cfg, st) {
+  // every level is one click in the bot, so a decision buys at most `clicks` levels in total
+  function buyOptions(cfg, st, clicks) {
     const out = [];
+    if (clicks < 1) return out;
     if (cfg.allowShop) {
       for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
         if (lUpgradeCost(st, k) > spendable(st)) continue;
-        const sp = spendable(st);
-        const steps = new Set([0, lLevelsWithin(st, k, sp + Math.log(0.04)), lLevelsWithin(st, k, sp + Math.log(0.15))]);
+        const sp = spendable(st), cap = Math.log(clicks);
+        const steps = new Set([0, Math.min(cap, lLevelsWithin(st, k, sp + Math.log(0.04))), Math.min(cap, lLevelsWithin(st, k, sp + Math.log(0.15)))]);
         for (const n of steps) if (n >= 0) out.push({ key: k, n: n });
       }
     }
@@ -476,7 +481,7 @@
   }
 
   function logBuy(log, st, key, lfrom, lto, lcost) {
-    const rec = { t: st.t, key: key, lfrom: lfrom, lto: lto, lcost: lcost };
+    const rec = { t: st.t, key: key, lfrom: lfrom, lto: lto, lcost: lcost, asc: log.ascends.length };
     log.buys.push(rec);
     const last = log.ascends[log.ascends.length - 1];
     if (last && Math.abs((last.tNext !== undefined ? last.tNext : last.t) - st.t) < 1e-6) last.buys.push(rec);
@@ -499,9 +504,9 @@
           return;
         }
         let quota = Math.max(12, Math.min(160, Math.floor(budget.left / 25)));
-        let iter = 0;
+        let iter = 0, clicks = cfg.maxClicks;
         while (iter++ < 12 && quota > 0 && budget.left > 0) {
-          const opts = buyOptions(cfg, st);
+          const opts = buyOptions(cfg, st, clicks);
           if (!opts.length) break;
           const base = rollout(cfg, st, T); budget.left--; quota--;
           let best = null, bv = base + cfg.buyMargin;
@@ -514,6 +519,7 @@
           if (!best) break;
           const lfrom = best.key === 'bank' ? Math.log(st.bankLv) : best.key === 'disc' ? ln(st.disc) : st[best.key];
           const lcost = applyBuy(cfg, st, best);
+          clicks -= best.key === 'bank' ? 1 : Math.round(Math.exp(best.n));
           const lto = best.key === 'bank' ? Math.log(st.bankLv + 1) : best.key === 'disc' ? ln(st.disc) : st[best.key];
           if (log) logBuy(log, st, best.key, lfrom, lto, lcost);
           if (best.key === 'bank') break;

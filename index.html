@@ -232,6 +232,7 @@ tbody tr:hover td { background: var(--sunk); }
             <div class="f"><label for="other">Other IB bonuses (+x)</label><input class="num" id="other" type="number" min="0" step="0.1"></div>
             <div class="f"><label for="rawCap">Hourly raw cap</label><input class="num" id="rawCap" type="text" inputmode="decimal"></div>
             <div class="f"><label for="minGap">Min hours between Ascends</label><input class="num" id="minGap" type="number" min="1" step="1"></div>
+            <div class="f"><label for="maxClicks">Max upgrade clicks per Ascend</label><input class="num" id="maxClicks" type="number" min="0" step="10"></div>
             <div class="f"><label for="lookahead">Decision window (days)</label><input class="num" id="lookahead" type="number" min="3" max="60" step="1"></div>
           </div>
           <p class="hint">Decision window: at every Ascend, each shop purchase and target prestige is simulated this many days ahead, and the one with the highest Income Bonus at the end of the window wins.</p>
@@ -316,7 +317,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Rewards</b>: daily and primedaily 100,000, weekly 1,000,000, monthly 10,000,000, each × Income × Income Bonus × (1 + 0.1 × Rewards). The plan holds weekly and monthly for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
                 <li><b>Ascend</b>: only needs P ≥ 1000 and burns the whole bank, so the plan spends it all on prestige right before. It gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards rounded down; rank doesn't count (confirmed: P1339 → 17, P2391 → 57, P2571 → 66). Since both the shards and the cost of prestige grow with P², every point buys about the same shards at any prestige: Ascending often wins, and <b>Min hours between Ascends</b> sets how often you are willing to act.</li>
                 <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Resonance and Interest raise income at once and are bought as soon as the plan picks them. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus.</li>
-                <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5). Confirmed linear: Interest Lv3 costs 15. Resonance Lv1 is confirmed with and without Prime (0.12 → 0.132x, 0.10 → 0.11x); that higher levels keep adding +10% each is an assumption.</li>
+                <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5), as the shards guide says. Each click in the bot buys one level, so <b>Max upgrade clicks per Ascend</b> caps how many levels the plan buys after each Ascend. Resonance Lv1 is confirmed with and without Prime (0.12 → 0.132x, 0.10 → 0.11x); that higher levels keep adding +10% each is an assumption.</li>
                 <li><b>Why far projections explode</b>: with linear costs, the levels you can afford grow with the square root of your shards, so each Ascend multiplies the next one. Separately, daily, weekly and monthly pay Income × IB: once prestige is in the hundreds of thousands they outgrow the bank, and spending them on prestige before an Ascend turns them into shards with the square of prestige. Either loop makes the number of digits, not the number itself, grow every day.</li>
                 <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
                 <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when the bank plus everything spent on prestige passes 2^bits: 64-bit is a signed database integer, about 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
@@ -361,7 +362,7 @@ tbody tr:hover td { background: var(--sunk); }
   const KEY = 'nexus-calculator-v2';
   const NEG = -Infinity, LN10 = Math.LN10;
   const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'claimEvery', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
-    'other', 'minGap', 'lookahead', 'round', 'rP', 'rR', 'rIB'];
+    'other', 'minGap', 'maxClicks', 'lookahead', 'round', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
@@ -386,7 +387,7 @@ tbody tr:hover td { background: var(--sunk); }
   // example account, replaced by whatever the visitor enters (kept in this browser)
   const DEFAULTS = {
     P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10, claimEvery: 12,
-    nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 12, lookahead: 14, round: 150,
+    nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 12, maxClicks: 100, lookahead: 14, round: 150,
     rP: 1000, rR: 100, rIB: 11.74,
     bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
     prime: true, boost: true, loan: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
@@ -504,6 +505,7 @@ tbody tr:hover td { background: var(--sunk); }
     c.loan = $('loan').checked;
     c.allowShop = $('allowShop').checked; c.allowBank = $('allowBank').checked; c.useRewards = $('useRewards').checked;
     c.minGap = Math.max(1, num('minGap', 12));
+    c.maxClicks = Math.max(0, Math.round(num('maxClicks', 100)));
     c.lookahead = Math.max(3, num('lookahead', 14)) * 24;
     c.objective = $('objective').value;
     c.round = Math.min(255, Math.max(10, Math.round(num('round', 150) / 5) * 5));
@@ -527,6 +529,7 @@ tbody tr:hover td { background: var(--sunk); }
     if ((m = text.match(/(\d[\d.,]*)\s+unspent/i)) || (m = text.match(/(\d[\d.,]*)\s+shards\s*\S\s*\+/i))) found.shards = parsePts(m[1]);
     if (/Prime\s*\n\s*Active/i.test(text) || /\(Prime\)/i.test(text)) found.prime = true;
     if ((m = text.match(/Server Boost\s*`?\+([\d.]+)/i))) found.boost = parseFloat(m[1]) > 0;
+    if ((m = text.match(/Networth\s*`?\+([\d.]+)/i))) found.other = parseFloat(m[1]);
     const p = after('prestige'); if (p && /^[\d.,]+$/.test(p)) found.P = parsePts(p);
     const r = after('rank'); if (r && /^[\d.,]+$/.test(r)) found.R = Math.min(100, parsePts(r));
     const b = after('bank balance') || after('bank') || after('new bank'); if (b && /points/i.test(b)) found.bal = b.replace(/\s*points?/i, '');
@@ -635,7 +638,7 @@ tbody tr:hover td { background: var(--sunk); }
   function renderActions(res) {
     const cfg = res.cfg, L = res.optimal.log;
     const ol = $('actions'); ol.textContent = '';
-    const buys0 = L.buys.filter(b => b.t < 1e-6);
+    const buys0 = L.buys.filter(b => b.asc === 0);
     const now0 = nowBuys(buys0), pre0 = prestigeBuys(buys0), yield0 = yieldBuys(buys0);
     let disc = cfg.disc;
     for (const b of pre0) if (b.key === 'disc') disc = Math.round(Math.exp(b.lto));
@@ -810,7 +813,7 @@ tbody tr:hover td { background: var(--sunk); }
       const rw = L.rewards.filter(r => Math.abs(r.t - a.t) < 1e-6 && (r.kind === 'weekly' || r.kind === 'monthly')).map(r => r.kind);
       if (rw.length) notes.append('claim ' + rw.join(' + ') + ' first. ');
       if (a.restart > 0) notes.append(`then about ${fmtDur(a.restart)} to rebuild ${fmtL(Math.log(M.reserveOf(cfg)))} without a loan. `);
-      const ybefore = yieldBuys(i === 0 ? L.buys.filter(b => b.t < 1e-6) : (L.ascends[i - 1] ? L.ascends[i - 1].buys : []));
+      const ybefore = yieldBuys(i === 0 ? L.buys.filter(b => b.asc === 0) : (L.ascends[i - 1] ? L.ascends[i - 1].buys : []));
       if (ybefore.length) notes.prepend('right before: buy ' + buysText(ybefore) + '. ');
       const after = nowBuys(a.buys || []), preNext = prestigeBuys(a.buys || []);
       if (after.length) notes.append((a.restart > 0 ? 'After that, buy ' : 'then buy ') + buysText(after) + '. ');
@@ -951,7 +954,7 @@ tbody tr:hover td { background: var(--sunk); }
     const f = parseBot($('paste').value);
     const keys = Object.keys(f);
     for (const k of keys) setVal(k, f[k]);
-    const labels = { shards: 'shards', prime: 'Prime', boost: 'server booster', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
+    const labels = { shards: 'shards', prime: 'Prime', boost: 'server booster', other: 'networth bonus', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
       res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount' };
     const msg = $('parseMsg');
     msg.className = 'msg ' + (keys.length ? 'ok' : 'bad');
