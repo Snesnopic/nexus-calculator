@@ -115,6 +115,9 @@ code { font-family: var(--f-mono); font-size: 0.84em; background: var(--surface)
 .note strong { color: var(--warn); }
 .chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; align-items: baseline; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.8rem; color: var(--ink-2); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { background: transparent; color: var(--ink-2); border: 0; border-radius: 0; padding: 4px 10px; font-weight: 500; font-size: 0.8rem; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend i { width: 16px; height: 2px; border-radius: 1px; display: inline-block; }
 .chartbox { position: relative; margin-top: 8px; }
@@ -305,7 +308,11 @@ tbody tr:hover td { background: var(--sunk); }
           </section>
           <section class="panel">
             <div class="chart-head">
-              <h2>Income Bonus over time</h2>
+              <h2 id="chartTitle">Income Bonus over time</h2>
+              <div class="seg" role="group" aria-label="Chart shows">
+                <button type="button" id="metIB" aria-pressed="true">Income Bonus</button>
+                <button type="button" id="metRate" aria-pressed="false">Bank per hour</button>
+              </div>
               <div class="legend" id="legend"></div>
             </div>
             <p class="hint" id="chartHint"></p>
@@ -740,13 +747,31 @@ tbody tr:hover td { background: var(--sunk); }
     }
   }
 
-  // y is log10(IB); when that spans more than 300 decades the axis switches to log10 of the digit count
+  // the chart shows either the Income Bonus (lib) or the bank income per hour (lrate)
+  let chartKey = 'lib', lastChart = null;
+  try { if (localStorage.getItem(KEY + '-chart') === 'lrate') chartKey = 'lrate'; } catch (e) { /* storage unavailable */ }
+  function setChartKey(k) {
+    chartKey = k;
+    $('metIB').setAttribute('aria-pressed', String(k === 'lib'));
+    $('metRate').setAttribute('aria-pressed', String(k === 'lrate'));
+    $('chartTitle').textContent = k === 'lib' ? 'Income Bonus over time' : 'Bank income per hour over time';
+    try { localStorage.setItem(KEY + '-chart', k); } catch (e) { /* storage unavailable */ }
+    if (lastChart) renderChart(...lastChart);
+  }
+  $('metIB').addEventListener('click', () => setChartKey('lib'));
+  $('metRate').addEventListener('click', () => setChartKey('lrate'));
+  setChartKey(chartKey);
+
+  // y is log10 of the value; when that spans more than 300 decades the axis switches to log10 of the digit count
   function renderChart(series, xEnd, capped) {
+    lastChart = [series, xEnd, capped];
+    const K = chartKey;
+    const fmtY = K === 'lib' ? fmtIBL : l => fmtL(l) + '/hr';
     const box = $('chartbox'); box.textContent = '';
     const lg = $('legend'); lg.textContent = '';
     for (const { s } of series) { const i = el('i'); i.style.background = s.color; lg.append(el('span', null, i, s.name)); }
     let dmin = Infinity, dmax = -Infinity;
-    for (const { pts } of series) for (const p of pts) if (p.t <= xEnd + 1e-9 && isFinite(p.lib)) { dmin = Math.min(dmin, p.lib / LN10); dmax = Math.max(dmax, p.lib / LN10); }
+    for (const { pts } of series) for (const p of pts) if (p.t <= xEnd + 1e-9 && isFinite(p[K])) { dmin = Math.min(dmin, p[K] / LN10); dmax = Math.max(dmax, p[K] / LN10); }
     const digits = dmax - dmin > 300;
     $('chartHint').textContent = (digits ? 'Double log scale: each step multiplies the number of digits by 10. ' : 'Log scale. ')
       + (capped ? 'The chart stops where the projection stops.' : 'Hover the chart to read values.');
@@ -757,7 +782,7 @@ tbody tr:hover td { background: var(--sunk); }
     const Y = lib => mt + ph * (1 - (yOf(lib) - ylo) / (yhi - ylo));
     const NS = 'http://www.w3.org/2000/svg';
     const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
-    const svg = mk('svg', { viewBox: `0 0 ${W} ${Hh}`, class: 'chart', role: 'img', 'aria-label': 'Income Bonus over time for four strategies' });
+    const svg = mk('svg', { viewBox: `0 0 ${W} ${Hh}`, class: 'chart', role: 'img', 'aria-label': (K === 'lib' ? 'Income Bonus' : 'Bank income per hour') + ' over time for four strategies' });
     const span = yhi - ylo, step = span <= 6 ? 1 : Math.ceil(span / 6);
     const ticks = [];
     for (let y = ylo; y <= yhi; y += step) {
@@ -769,7 +794,7 @@ tbody tr:hover td { background: var(--sunk); }
       const py = Y(lib);
       if (py < mt - 1 || py > mt + ph + 1) continue;
       svg.append(mk('line', { x1: ml, x2: ml + pw, y1: py, y2: py, stroke: 'var(--grid)', 'stroke-width': 1 }));
-      const t = mk('text', { x: ml - 8, y: py + 4, 'text-anchor': 'end' }); t.textContent = fmtIBL(lib); svg.append(t);
+      const t = mk('text', { x: ml - 8, y: py + 4, 'text-anchor': 'end' }); t.textContent = fmtY(lib); svg.append(t);
     }
     svg.append(mk('line', { x1: ml, x2: ml + pw, y1: mt + ph, y2: mt + ph, stroke: 'var(--axis)', 'stroke-width': 1 }));
     const days = xEnd / 24;
@@ -784,13 +809,13 @@ tbody tr:hover td { background: var(--sunk); }
       const { s, pts } = series[i];
       let d = '', prev = null;
       for (const p of pts) {
-        if (p.t > xEnd + 1e-9 || !isFinite(p.lib)) break;
-        d += prev === null ? `M${X(p.t).toFixed(1)},${Y(p.lib).toFixed(1)}` : `H${X(p.t).toFixed(1)}V${Y(p.lib).toFixed(1)}`;
+        if (p.t > xEnd + 1e-9 || !isFinite(p[K])) break;
+        d += prev === null ? `M${X(p.t).toFixed(1)},${Y(p[K]).toFixed(1)}` : `H${X(p.t).toFixed(1)}V${Y(p[K]).toFixed(1)}`;
         prev = p;
       }
       if (prev) d += `H${X(xEnd).toFixed(1)}`;
       svg.append(mk('path', { d: d, fill: 'none', stroke: s.color, 'stroke-width': i === 0 ? 2.5 : 2, 'stroke-linejoin': 'round' }));
-      if (prev) labels.push({ y: Y(prev.lib), text: s.short + ' ' + fmtIBL(prev.lib) });
+      if (prev) labels.push({ y: Y(prev[K]), text: s.short + ' ' + fmtY(prev[K]) });
     }
     labels.sort((a, b) => a.y - b.y);
     for (let i = 1; i < labels.length; i++) if (labels[i].y - labels[i - 1].y < 13) labels[i].y = labels[i - 1].y + 13;
@@ -814,7 +839,7 @@ tbody tr:hover td { background: var(--sunk); }
       tip.append(el('div', { class: 't' }, fmtWhen(t)));
       for (const { s, pts } of series) {
         const i = el('i'); i.style.background = s.color;
-        tip.append(el('div', { class: 'r' }, el('span', null, i, s.name), el('b', null, fmtIBL(stepAt(pts, t, 'lib')))));
+        tip.append(el('div', { class: 'r' }, el('span', null, i, s.name), el('b', null, fmtY(stepAt(pts, t, K)))));
       }
       tip.hidden = false;
       const px = x * r.width / W;
