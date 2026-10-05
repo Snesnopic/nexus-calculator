@@ -50,7 +50,7 @@
       loan: true, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 0, minGap: 1, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
       limitBits: Infinity, maxClicks: 100,
-      objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000
+      objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000, targetRate: 1e14
     };
   }
 
@@ -354,12 +354,16 @@
     return fresh < rem;
   }
 
-  // reaching the target IB sooner always beats not reaching it (whose value is ln IB < ln target)
-  const reachValue = (cfg, t) => Math.log(cfg.targetIB) + 1e6 - t;
+  // 'reach' targets an Income Bonus, 'reachRate' a bank income per hour; reaching it sooner always beats
+  // not reaching it, whose value is ln(metric) < ln(target)
+  const isReach = cfg => cfg.objective === 'reach' || cfg.objective === 'reachRate';
+  const goalOf = cfg => cfg.objective === 'reach' ? Math.log(cfg.targetIB) : cfg.objective === 'reachRate' ? Math.log(cfg.targetRate) : Infinity;
+  const metricOf = (cfg, st) => cfg.objective === 'reachRate' ? lRate(cfg, st) : lIB(cfg, st);
+  const reachValue = (cfg, t) => goalOf(cfg) + 1e6 - t;
 
   // ln of the final value for the chosen objective
   function finalValue(cfg, st, log) {
-    if (cfg.objective === 'reach' && st.reached !== undefined) {
+    if (isReach(cfg) && st.reached !== undefined) {
       if (log) log.final = { lib: lIB(cfg, st), lrate: lRate(cfg, st), lS: st.S };
       return reachValue(cfg, st.reached);
     }
@@ -386,9 +390,9 @@
       if (log) log.finalAscend = { t: fs.t, lP: lP, lgain: lSub(fs.S, spendable(st)), lS: fs.S, lib: lIB(cfg, fs), lrate: lRate(cfg, fs) };
     }
     if (log) log.final = { lib: lIB(cfg, fs), lrate: lRate(cfg, fs), lS: fs.S };
-    if (cfg.objective === 'reach') {
-      if (lIB(cfg, fs) >= Math.log(cfg.targetIB)) { if (log) log.reachedAt = st.t; return reachValue(cfg, st.t); }
-      return lIB(cfg, fs);
+    if (isReach(cfg)) {
+      if (metricOf(cfg, fs) >= goalOf(cfg)) { if (log) log.reachedAt = st.t; return reachValue(cfg, st.t); }
+      return metricOf(cfg, fs);
     }
     return cfg.objective === 'income' ? lRate(cfg, fs) : lIB(cfg, fs);
   }
@@ -437,12 +441,14 @@
   }
 
   function run(cfg, st, T, policy, log, firstDone) {
-    const lGoal = cfg.objective === 'reach' ? Math.log(cfg.targetIB) : Infinity;
-    if (lIB(cfg, st) >= lGoal) {
-      st.reached = st.t; st.stopped = true;
-      if (log) log.reachedAt = st.t;
-      return finalValue(cfg, st, log);
-    }
+    const lGoal = goalOf(cfg);
+    const hit = (t) => {
+      if (metricOf(cfg, st) < lGoal) return false;
+      st.reached = t; st.stopped = true;
+      if (log) log.reachedAt = t;
+      return true;
+    };
+    if (hit(st.t)) return finalValue(cfg, st, log);
     if (!firstDone) policy.decide(cfg, st, T, log);
     rebalance(cfg, st);
     const lMinBal = Math.log(cfg.minBal);
@@ -462,6 +468,7 @@
       if (st.bankNeed !== NEG) {
         st.L = lSub(st.L, st.bankNeed); st.bankNeed = NEG; st.bankLv++;
         if (log) log.bank.push({ t: st.t, lv: st.bankLv });
+        if (hit(st.t)) break;
         rebalance(cfg, st);
         continue;
       }
@@ -469,12 +476,9 @@
         claimRewards(cfg, st, log, true);
         const tA = st.t;
         doAscend(cfg, st, log);
-        if (lIB(cfg, st) >= lGoal) {
-          st.reached = tA; st.stopped = true;
-          if (log) log.reachedAt = tA;
-          break;
-        }
+        if (hit(tA)) break;
         policy.decide(cfg, st, T, log);
+        if (cfg.objective === 'reachRate' && hit(st.t)) break;
         rebalance(cfg, st);
       } else {
         st.target = HOLD;
@@ -506,7 +510,7 @@
   function rollout(cfg, st, T, targetOverride) {
     const s = clone(st);
     const Te = Math.min(T, st.t + cfg.lookahead);
-    const c = Te < T && cfg.objective !== 'reach' ? (cfg._ibCfg || (cfg._ibCfg = Object.assign({}, cfg, { objective: 'ib' }))) : cfg;
+    const c = Te < T && !isReach(cfg) ? (cfg._ibCfg || (cfg._ibCfg = Object.assign({}, cfg, { objective: 'ib' }))) : cfg;
     s.target = targetOverride !== undefined ? targetOverride : pStar(cfg, paidView(s));
     return run(c, s, Te, basePolicy, null, true);
   }

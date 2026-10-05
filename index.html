@@ -269,6 +269,7 @@ tbody tr:hover td { background: var(--sunk); }
               <select id="objective">
                 <option value="ib">Highest Income Bonus by the date</option>
                 <option value="reach">Reach a target Income Bonus as soon as possible</option>
+                <option value="reachRate">Reach a target bank income per hour as soon as possible</option>
                 <option value="income">Highest bank income by the date</option>
                 <option value="bo2">Biggest Zombies run on the date</option>
               </select>
@@ -286,6 +287,7 @@ tbody tr:hover td { background: var(--sunk); }
               </select>
             </div>
             <div class="f narrow reachonly"><label for="targetIB">Target IB</label><input class="num" id="targetIB" type="number" min="1" step="100"></div>
+            <div class="f narrow reachrateonly"><label for="targetRate">Target bank/hr</label><input class="num" id="targetRate" type="text" inputmode="decimal" placeholder="e.g. 100T"></div>
             <div class="f narrow bo2only"><label for="round">Last round</label><input class="num" id="round" type="number" min="10" max="255" step="5"></div>
             <label class="check bo2only"><input id="reinvest" type="checkbox"> Buy prestige during the run</label>
             <button id="calcBtn" type="button">Recalculate</button>
@@ -334,7 +336,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Why far projections explode</b>: with linear costs, the levels you can afford grow with the square root of your shards, so each Ascend multiplies the next one. Separately, daily, weekly and monthly pay Income × IB: once prestige is in the hundreds of thousands they outgrow the bank, and spending them on prestige before an Ascend turns them into shards with the square of prestige. Either loop makes the number of digits, not the number itself, grow every day.</li>
                 <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
                 <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when the bank plus everything spent on prestige passes 2^bits: 64-bit is a signed database integer, about 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
-                <li><b>Reach a target Income Bonus</b>: the plan stops as soon as an Ascend takes your Income Bonus to the target, and every choice is judged by how early that happens. When the target is further away than the decision window, a choice is judged by the Income Bonus it reaches by the end of the window.</li>
+                <li><b>Reach a target Income Bonus or bank income</b>: the plan stops as soon as your Income Bonus (after an Ascend) or your bank income per hour (after an Ascend or a purchase) gets to the target, and every choice is judged by how early that happens. When the target is further away than the decision window, a choice is judged by the Income Bonus it reaches by the end of the window.</li>
                 <li><b>Optimiser</b>: at every Ascend it tries shop purchases and target prestiges, simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
               </ul>
             </details>
@@ -377,7 +379,7 @@ tbody tr:hover td { background: var(--sunk); }
   const NEG = -Infinity, LN10 = Math.LN10;
   const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
     'other', 'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
-  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'paste'];
+  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
   const SERIES = [
@@ -403,7 +405,7 @@ tbody tr:hover td { background: var(--sunk); }
     P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
     nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 6, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
     rP: 1000, rR: 100, rIB: 11.74,
-    bal: '6.6T', rawCap: '100B', activeFrom: '09:00', activeTo: '22:00', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
+    bal: '6.6T', rawCap: '100B', targetRate: '100T', activeFrom: '09:00', activeTo: '22:00', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
     prime: true, boost: true, loan: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
     rUseAcc: true, rReinvest: false
   };
@@ -527,6 +529,8 @@ tbody tr:hover td { background: var(--sunk); }
     c.round = Math.min(255, Math.max(10, Math.round(num('round', 150) / 5) * 5));
     c.reinvest = $('reinvest').checked;
     c.targetIB = Math.max(1, num('targetIB', 1000));
+    const tr = parsePts($('targetRate').value); c.targetRate = isFinite(tr) && tr > 0 ? tr : 1e14;
+    $('targetRate').classList.toggle('bad', !isFinite(tr));
     c.limitBits = $('limitBits').value === 'none' ? Infinity : parseInt($('limitBits').value, 10);
     c.horizonH = (new Date($('targetDate').value).getTime() - NOW) / 3600e3;
     c.budget = 500;
@@ -625,11 +629,13 @@ tbody tr:hover td { background: var(--sunk); }
     const final = L.final || {};
     const kp = $('kpis'); kp.textContent = '';
     const first = L.ascends[0];
-    if (cfg.objective === 'reach') {
-      const goal = fmtIBL(Math.log(cfg.targetIB));
+    if (cfg.objective === 'reach' || cfg.objective === 'reachRate') {
+      const ib = cfg.objective === 'reach';
+      const goal = ib ? fmtIBL(Math.log(cfg.targetIB)) : fmtL(Math.log(cfg.targetRate)) + '/hr';
       kp.append(kpi('Reaches ' + goal, reached !== undefined ? (reached < 0.05 ? 'already there' : fmtWhen(reached)) : 'not by ' + fmtDay(H),
-        reached !== undefined ? (reached < 0.05 ? 'your Income Bonus is above it' : 'in ' + fmtDur(reached)) : 'pick a later date in Search until'));
-      kp.append(kpi('Income Bonus then', fmtIBL(final.lib), 'today ' + fmtIBL(res.now.lib)));
+        reached !== undefined ? (reached < 0.05 ? 'you are already above it' : 'in ' + fmtDur(reached)) : 'pick a later date in Search until'));
+      if (ib) kp.append(kpi('Income Bonus then', fmtIBL(final.lib), 'today ' + fmtIBL(res.now.lib)));
+      else kp.append(kpi('Bank per hour then', fmtL(final.lrate), 'today ' + fmtL(res.now.lrate) + ' · IB ' + fmtIBL(final.lib)));
     } else if (cfg.objective === 'bo2') {
       kp.append(kpi('Run payout', fmtL(final.lreward), `up to round ${cfg.round}` + (capped ? ', at the limit' : '')));
       kp.append(kpi('Enter the run with', 'Income ' + fmtIntL(final.lpm) + 'x', 'Income Bonus ' + fmtIBL(final.lib)));
@@ -852,9 +858,10 @@ tbody tr:hover td { background: var(--sunk); }
   }
 
   function renderCompare(res) {
-    const bo2 = res.cfg.objective === 'bo2', reach = res.cfg.objective === 'reach';
+    const bo2 = res.cfg.objective === 'bo2', reach = /^reach/.test(res.cfg.objective);
+    const goalTxt = res.cfg.objective === 'reach' ? fmtIBL(Math.log(res.cfg.targetIB)) : fmtL(Math.log(res.cfg.targetRate)) + '/hr';
     const tb = $('cmpTable'); tb.textContent = '';
-    tb.append(el('thead', null, el('tr', null, el('th', null, 'Strategy'), el('th', { class: 'r' }, bo2 ? 'Run payout' : reach ? 'Reaches ' + fmtIBL(Math.log(res.cfg.targetIB)) : 'IB at the end'),
+    tb.append(el('thead', null, el('tr', null, el('th', null, 'Strategy'), el('th', { class: 'r' }, bo2 ? 'Run payout' : reach ? 'Reaches ' + goalTxt : 'IB at the end'),
       el('th', { class: 'r' }, bo2 ? 'IB at the end' : 'Bank/hr at the end'), el('th', { class: 'r' }, 'Ascends'), el('th', null, 'Ends'))));
     const body = el('tbody');
     const names = ['P* without upgrades', 'Always P1000', 'Always P1500', 'Always P2000', 'Always P3000'];
@@ -955,7 +962,8 @@ tbody tr:hover td { background: var(--sunk); }
     save();
     document.querySelectorAll('.bo2only').forEach(e => { e.hidden = $('objective').value !== 'bo2'; });
     document.querySelectorAll('.reachonly').forEach(e => { e.hidden = $('objective').value !== 'reach'; });
-    document.querySelector('label[for="targetDate"]').textContent = $('objective').value === 'reach' ? 'Search until' : 'Date';
+    document.querySelectorAll('.reachrateonly').forEach(e => { e.hidden = $('objective').value !== 'reachRate'; });
+    document.querySelector('label[for="targetDate"]').textContent = /^reach/.test($('objective').value) ? 'Search until' : 'Date';
     const cfg = readCfg();
     $('bal').classList.toggle('bad', !isFinite(parsePts($('bal').value)));
     readout(cfg);
