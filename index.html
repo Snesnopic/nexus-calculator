@@ -221,6 +221,8 @@ tbody tr:hover td { background: var(--sunk); }
             <div class="f"><label for="nPrime">/primedaily</label><input class="num" id="nPrime" type="number" min="0" step="1"></div>
             <div class="f"><label for="nWeekly">/weekly</label><input class="num" id="nWeekly" type="number" min="0" step="1"></div>
             <div class="f"><label for="nMonthly">/monthly</label><input class="num" id="nMonthly" type="number" min="0" step="1"></div>
+            <div class="f"><label for="nPWeekly">/primeweekly</label><input class="num" id="nPWeekly" type="number" min="0" step="1"></div>
+            <div class="f"><label for="nPMonthly">/primemonthly</label><input class="num" id="nPMonthly" type="number" min="0" step="1"></div>
           </div>
           <p class="hint">0 means available now. Cooldowns restart from your last claim.</p>
         </fieldset>
@@ -329,7 +331,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–16 cost 1.5T, 5T, 15T, 50T, 150T; the other levels are extrapolated (500T, 1.5Qa, 5Qa, 15Qa). Artifacts needed for upgrades are ignored.</li>
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
-                <li><b>Rewards</b>: daily and primedaily 100,000, weekly 1,000,000, monthly 10,000,000, each × Income × Income Bonus × (1 + 0.1 × Rewards). The plan holds weekly and monthly for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
+                <li><b>Rewards</b>: daily and primedaily 100,000, weekly and primeweekly 1,000,000, monthly and primemonthly 10,000,000, each × Income × Income Bonus; the Rewards upgrade adds 10% per level to daily, weekly, monthly and primedaily. The plan holds the weekly and monthly ones for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
                 <li><b>Ascend</b>: only needs P ≥ 1000 and burns the whole bank, so the plan spends it all on prestige right before. It gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards rounded down; rank doesn't count (confirmed: P1339 → 17, P2391 → 57, P2571 → 66). Since both the shards and the cost of prestige grow with P², every point buys about the same shards at any prestige: Ascending often wins, and <b>Min hours between Ascends</b> sets how often you are willing to act.</li>
                 <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Resonance and Interest raise income at once and are bought as soon as the plan picks them. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus.</li>
                 <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5), as the shards guide says. Each click in the bot buys one level, so <b>Max upgrade clicks per Ascend</b> caps how many levels the plan buys after each Ascend. Levels add up rather than compound: an Interest Lv2 claim pays exactly ×1.20 (not ×1.21), and Resonance Lv1 gives 0.132x per shard with Prime, 0.11x without.</li>
@@ -377,7 +379,7 @@ tbody tr:hover td { background: var(--sunk); }
   const $ = id => document.getElementById(id);
   const KEY = 'nexus-calculator-v2';
   const NEG = -Infinity, LN10 = Math.LN10;
-  const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
+  const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly', 'nPWeekly', 'nPMonthly',
     'other', 'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
@@ -403,7 +405,7 @@ tbody tr:hover td { background: var(--sunk); }
   // example account, replaced by whatever the visitor enters (kept in this browser)
   const DEFAULTS = {
     P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
-    nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 6, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
+    nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, nPWeekly: 168, nPMonthly: 720, other: 0, minGap: 6, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
     rP: 1000, rR: 100, rIB: 11.74,
     bal: '6.6T', rawCap: '100B', targetRate: '100T', activeFrom: '09:00', activeTo: '22:00', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
     prime: true, boost: true, loan: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
@@ -519,7 +521,8 @@ tbody tr:hover td { background: var(--sunk); }
     c.rate = ((c.prime ? 1.25 : 0.25) + Math.max(0, num('artifact', 0))) / 100;
     const raw = parsePts($('rawCap').value);
     c.rawCap = isFinite(raw) && raw > 0 ? raw : 1e11;
-    c.nextIn = { daily: num('nDaily', 24), prime: num('nPrime', 24), weekly: num('nWeekly', 168), monthly: num('nMonthly', 720) };
+    c.nextIn = { daily: num('nDaily', 24), prime: num('nPrime', 24), weekly: num('nWeekly', 168), monthly: num('nMonthly', 720),
+      pweekly: num('nPWeekly', 168), pmonthly: num('nPMonthly', 720) };
     c.loan = $('loan').checked;
     c.allowShop = $('allowShop').checked; c.allowBank = $('allowBank').checked; c.useRewards = $('useRewards').checked;
     c.minGap = Math.max(0.25, num('minGap', 6));
@@ -709,7 +712,7 @@ tbody tr:hover td { background: var(--sunk); }
       if (canRaise) parts.push(cmd('/prestigeupto ' + Pnow), ' and ', cmd('/rankupmax'), ` (P${fmtInt(Pnow)} R100, Income ${fmtInt(100 * top)}x${soon ? '' : ', higher if you have earned more by then'}), then `);
       parts.push('claim ', cmd('/daily'));
       if (cfg.prime) parts.push(' and ', cmd('/primedaily'));
-      parts.push(`, worth about ${fmtL(Math.log(1e5) + Math.log(100 * Math.max(1, top)) + M.lIB(cfg, stPaid) + Math.log(1 + 0.1 * Math.round(Math.exp(stPaid.rew === NEG ? NEG : stPaid.rew))))} each. Weekly and monthly wait for the Ascend, when prestige is highest.`);
+      parts.push(`, worth about ${fmtL(Math.log(1e5) + Math.log(100 * Math.max(1, top)) + M.lIB(cfg, stPaid) + Math.log(1 + 0.1 * Math.round(Math.exp(stPaid.rew === NEG ? NEG : stPaid.rew))))} each. Weekly and monthly rewards${cfg.prime ? ', Prime ones included,' : ''} wait for the Ascend, when prestige is highest.`);
       ol.append(li(...parts));
     }
     if (a) {
@@ -717,7 +720,7 @@ tbody tr:hover td { background: var(--sunk); }
       const parts = [`Next Ascend at P${fmtIntL(a.lP)} ${a.t < 0.05 ? 'right now' : 'on ' + fmtWhen(a.t) + ' (in ' + fmtDur(a.t) + ')'}, about ${fmtL(lnOf(M.costToPD(Pa, d)))} of prestige in total. Order: `,
         cmd('/claiminterest'), ', '];
       if (!preAtDaily && pre0.length) parts.push('buy ', buysText(pre0), ', ');
-      parts.push(cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), ', claim weekly and monthly if ready, ');
+      parts.push(cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), cfg.prime ? ', claim weekly, monthly, primeweekly and primemonthly if ready, ' : ', claim weekly and monthly if ready, ');
       if (yield0.length) parts.push('buy ', buysText(yield0), ' only now, since it just boosts this Ascend, ');
       parts.push(cmd('/maxprestige'), ' (the whole bank is burned, so spend all of it), ', cmd('/ascend'));
       if (cfg.loan) parts.push(`. Then borrow ${fmtL(lnOf(reserve))}, `, cmd('/claiminterest'), ' and pay it back.');
@@ -841,7 +844,7 @@ tbody tr:hover td { background: var(--sunk); }
         return;
       }
       const notes = el('td');
-      const rw = L.rewards.filter(r => Math.abs(r.t - a.t) < 1e-6 && (r.kind === 'weekly' || r.kind === 'monthly')).map(r => r.kind);
+      const rw = L.rewards.filter(r => Math.abs(r.t - a.t) < 1e-6 && /weekly|monthly/.test(r.kind)).map(r => ({ pweekly: 'primeweekly', pmonthly: 'primemonthly' })[r.kind] || r.kind);
       if (rw.length) notes.append('claim ' + rw.join(' + ') + ' first. ');
       if (a.restart > 0) notes.append(`then about ${fmtDur(a.restart)} to rebuild ${fmtL(Math.log(M.reserveOf(cfg)))} without a loan. `);
       const ybefore = yieldBuys(i === 0 ? L.buys.filter(b => b.asc === 0) : (L.ascends[i - 1] ? L.ascends[i - 1].buys : []));

@@ -7,7 +7,12 @@
   const RANK_K = 250;
   const HOLD = Infinity;
   const NEG = -Infinity;
-  const KINDS = ['daily', 'prime', 'weekly', 'monthly'];
+  // primeweekly / primemonthly pay like weekly / monthly; the Rewards upgrade only lists the first four
+  const KINDS = ['daily', 'prime', 'weekly', 'monthly', 'pweekly', 'pmonthly'];
+  const PRIME_ONLY = { prime: true, pweekly: true, pmonthly: true };
+  const REW_BOOSTED = { daily: true, prime: true, weekly: true, monthly: true };
+  const DEFERRED = { weekly: true, monthly: true, pweekly: true, pmonthly: true };
+  const hasKind = (cfg, k) => !PRIME_ONLY[k] || cfg.prime;
   const LN10 = Math.LN10, LN2 = Math.LN2;
   const L_SMALL = Math.log(1e30);
   const L_MAX = 1e300;
@@ -44,9 +49,9 @@
       P: 1000, R: 1, bal: 6616699127772,
       bankLv: 15, bankBonus: 1.70, rate: 0.1125, rawCap: 1e11, storage: 40, activeFrom: 9, activeTo: 22, clock0: 0,
       bankCosts: bankCostTable(),
-      rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7 },
-      cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
-      nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
+      rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7, pweekly: 1e6, pmonthly: 1e7 },
+      cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720, pweekly: 168, pmonthly: 720 },
+      nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720, pweekly: 168, pmonthly: 720 },
       loan: true, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 0, minGap: 1, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
       limitBits: Infinity, maxClicks: 100,
@@ -114,9 +119,12 @@
   function lRho(cfg, st) {
     if (!cfg.useRewards) return NEG;
     const b = cfg.rewBase, c = cfg.cooldown;
-    let r = b.daily / c.daily + b.weekly / c.weekly + b.monthly / c.monthly;
-    if (cfg.prime) r += b.prime / c.prime;
-    return Math.log(r) + lTenth(st.rew);
+    let boosted = 0, plain = 0;
+    for (const k of KINDS) {
+      if (!hasKind(cfg, k)) continue;
+      if (REW_BOOSTED[k]) boosted += b[k] / c[k]; else plain += b[k] / c[k];
+    }
+    return lAdd(Math.log(boosted) + lTenth(st.rew), ln(plain));
   }
   function blockSum(round) {
     let s = 0;
@@ -244,7 +252,7 @@
       bankLv: cfg.bankLv, Wp: NEG, L: NEG, target: HOLD, bankNeed: NEG, lastAsc: -Infinity, yDebt: NEG, pDebt: NEG,
       next: {}, heldP: cfg.P, heldR: cfg.R
     };
-    for (const k of KINDS) st.next[k] = st.t + Math.max(0, cfg.nextIn[k]);
+    for (const k of KINDS) st.next[k] = st.t + Math.max(0, cfg.nextIn[k] !== undefined ? cfg.nextIn[k] : cfg.cooldown[k]);
     return st;
   }
   // held prestige is valued at the current discount
@@ -276,20 +284,20 @@
     rebalance(cfg, st);
   }
   function deferOf(cfg, st, k) {
-    return (k === 'weekly' || k === 'monthly') && st.target !== HOLD ? cfg.deferFrac * cfg.cooldown[k] : 0;
+    return DEFERRED[k] && st.target !== HOLD ? cfg.deferFrac * cfg.cooldown[k] : 0;
   }
-  // weekly and monthly wait (up to deferFrac of their cooldown) for the next ascend, where prestige peaks
+  // weekly and monthly rewards wait (up to deferFrac of their cooldown) for the next ascend, where prestige peaks
   function claimRewards(cfg, st, log, atAscend) {
     if (!cfg.useRewards) return;
     const dueNow = k => (atAscend ? st.next[k] : st.next[k] + deferOf(cfg, st, k)) <= st.t + 1e-9;
-    if (KINDS.some(k => (k !== 'prime' || cfg.prime) && dueNow(k))) payPrestigeDebt(st);
+    if (KINDS.some(k => hasKind(cfg, k) && dueNow(k))) payPrestigeDebt(st);
     const lpm = lPm(st.Wp, dOf(st));
     const lib = lIB(cfg, st);
     for (const k of KINDS) {
-      if (k === 'prime' && !cfg.prime) continue;
+      if (!hasKind(cfg, k)) continue;
       const due = atAscend ? st.next[k] : st.next[k] + deferOf(cfg, st, k);
       if (due <= st.t + 1e-9) {
-        const amt = Math.log(cfg.rewBase[k]) + lpm + lib + lTenth(st.rew);
+        const amt = Math.log(cfg.rewBase[k]) + lpm + lib + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
         st.L = lAdd(st.L, amt);
         st.next[k] = st.t + cfg.cooldown[k];
         if (log) log.rewards.push({ t: st.t, kind: k, lpm: lpm, lamount: amt });
@@ -301,7 +309,7 @@
     if (!cfg.useRewards) return Infinity;
     let m = Infinity;
     for (const k of KINDS) {
-      if (k === 'prime' && !cfg.prime) continue;
+      if (!hasKind(cfg, k)) continue;
       const due = st.next[k] + deferOf(cfg, st, k);
       if (due < m) m = due;
     }
