@@ -50,7 +50,7 @@
       loan: true, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 0, minGap: 12, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
       limitBits: Infinity, maxClicks: 100,
-      objective: 'ib', horizonH: 1400, round: 150, reinvest: false
+      objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000
     };
   }
 
@@ -346,8 +346,15 @@
     return fresh < rem;
   }
 
+  // reaching the target IB sooner always beats not reaching it (whose value is ln IB < ln target)
+  const reachValue = (cfg, t) => Math.log(cfg.targetIB) + 1e6 - t;
+
   // ln of the final value for the chosen objective
   function finalValue(cfg, st, log) {
+    if (cfg.objective === 'reach' && st.reached !== undefined) {
+      if (log) log.final = { lib: lIB(cfg, st), lrate: lRate(cfg, st), lS: st.S };
+      return reachValue(cfg, st.reached);
+    }
     if (cfg.objective === 'bo2') {
       payPrestigeDebt(st);
       const lib = lIB(cfg, st);
@@ -371,6 +378,10 @@
       if (log) log.finalAscend = { t: fs.t, lP: lP, lgain: lSub(fs.S, spendable(st)), lS: fs.S, lib: lIB(cfg, fs), lrate: lRate(cfg, fs) };
     }
     if (log) log.final = { lib: lIB(cfg, fs), lrate: lRate(cfg, fs), lS: fs.S };
+    if (cfg.objective === 'reach') {
+      if (lIB(cfg, fs) >= Math.log(cfg.targetIB)) { if (log) log.reachedAt = st.t; return reachValue(cfg, st.t); }
+      return lIB(cfg, fs);
+    }
     return cfg.objective === 'income' ? lRate(cfg, fs) : lIB(cfg, fs);
   }
 
@@ -418,6 +429,12 @@
   }
 
   function run(cfg, st, T, policy, log, firstDone) {
+    const lGoal = cfg.objective === 'reach' ? Math.log(cfg.targetIB) : Infinity;
+    if (lIB(cfg, st) >= lGoal) {
+      st.reached = st.t; st.stopped = true;
+      if (log) log.reachedAt = st.t;
+      return finalValue(cfg, st, log);
+    }
     if (!firstDone) policy.decide(cfg, st, T, log);
     rebalance(cfg, st);
     const lMinBal = Math.log(cfg.minBal);
@@ -442,7 +459,13 @@
       }
       if (policy.shouldAscend(cfg, st, T)) {
         claimRewards(cfg, st, log, true);
+        const tA = st.t;
         doAscend(cfg, st, log);
+        if (lIB(cfg, st) >= lGoal) {
+          st.reached = tA; st.stopped = true;
+          if (log) log.reachedAt = tA;
+          break;
+        }
         policy.decide(cfg, st, T, log);
         rebalance(cfg, st);
       } else {
@@ -475,7 +498,7 @@
   function rollout(cfg, st, T, targetOverride) {
     const s = clone(st);
     const Te = Math.min(T, st.t + cfg.lookahead);
-    const c = Te < T ? (cfg._ibCfg || (cfg._ibCfg = Object.assign({}, cfg, { objective: 'ib' }))) : cfg;
+    const c = Te < T && cfg.objective !== 'reach' ? (cfg._ibCfg || (cfg._ibCfg = Object.assign({}, cfg, { objective: 'ib' }))) : cfg;
     s.target = targetOverride !== undefined ? targetOverride : pStar(cfg, paidView(s));
     return run(c, s, Te, basePolicy, null, true);
   }
