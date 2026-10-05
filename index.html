@@ -197,9 +197,19 @@ tbody tr:hover td { background: var(--sunk); }
           <div class="fields">
             <div class="f"><label for="bankLv">Bank level</label><select class="num" id="bankLv"></select></div>
             <div class="f"><label for="artifact">Artifact interest (%/hr)</label><input class="num" id="artifact" type="number" min="0" step="0.25"></div>
-            <div class="f"><label for="claimEvery">You claim interest every (hours)</label><input class="num" id="claimEvery" type="number" min="1" step="1"></div>
           </div>
           <p class="derived" id="bankDerived"></p>
+        </fieldset>
+      </div>
+
+      <div class="panel">
+        <fieldset>
+          <legend>When you are online</legend>
+          <div class="fields">
+            <div class="f"><label for="activeFrom">From</label><input class="num" id="activeFrom" type="time"></div>
+            <div class="f"><label for="activeTo">Until</label><input class="num" id="activeTo" type="time"></div>
+          </div>
+          <p class="hint">Ascends, purchases and reward claims only happen in this window. While you are away interest keeps piling up, up to the storage limit. Same time in both = always online.</p>
         </fieldset>
       </div>
 
@@ -231,7 +241,7 @@ tbody tr:hover td { background: var(--sunk); }
           <div class="fields">
             <div class="f"><label for="other">Other IB bonuses (+x)</label><input class="num" id="other" type="number" min="0" step="0.1"></div>
             <div class="f"><label for="rawCap">Hourly raw cap</label><input class="num" id="rawCap" type="text" inputmode="decimal"></div>
-            <div class="f"><label for="minGap">Min hours between Ascends</label><input class="num" id="minGap" type="number" min="1" step="1"></div>
+            <div class="f"><label for="minGap">Min hours between Ascends</label><input class="num" id="minGap" type="number" min="0.25" step="0.5"></div>
             <div class="f"><label for="maxClicks">Max upgrade clicks per Ascend</label><input class="num" id="maxClicks" type="number" min="0" step="10"></div>
             <div class="f"><label for="lookahead">Decision window (days)</label><input class="num" id="lookahead" type="number" min="3" max="60" step="1"></div>
           </div>
@@ -312,7 +322,8 @@ tbody tr:hover td { background: var(--sunk); }
               <ul>
                 <li><b>Income Bonus</b> = 1 + 0.5 (Prime) + server booster + other bonuses (these two together cap at 10) + unspent shards × 0.12 (0.10 without Prime) × (1 + 0.1 × Resonance). Matches /stats.</li>
                 <li><b>Bank</b>: raw per hour = min(balance × interest rate, 100B). A claim pays raw × bank bonus × (1 + 0.1 × Interest) × Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance needed for the full raw is 100B ÷ interest rate (0.89T at 11.25%/hr); the plan always keeps that much, and it is also the loan you need after an Ascend to claim the stored hours at full rate. Without a loan the plan assumes you rebuild that balance from /daily and /primedaily by claiming often, and loses the hours it takes. Matches /bank.</li>
-                <li><b>Storage</b>: interest piles up for at most 40 h at bank Lv15, +4 h per level. If you claim less often than that, the plan scales your interest by storage ÷ hours between claims. Claim timing otherwise doesn't matter: what you claim goes into prestige either way, and stored hours survive an Ascend.</li>
+                <li><b>Online hours</b>: Ascends, shop purchases, prestige purchases and reward claims only happen between <b>From</b> and <b>Until</b>; a reward that becomes ready while you are away is claimed when you come back, and its cooldown restarts from then. Interest piles up while you are away for at most 40 h at bank Lv15 (+4 h per level); if you are away longer than that every day, the plan counts the lost hours. Stored hours survive an Ascend.</li>
+                <li><b>Min hours between Ascends</b>: without a bank minimum every point buys about the same shards, so Ascending more often than every few hours barely helps; it mostly adds clicks and makes the calculation slower.</li>
                 <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–16 cost 1.5T, 5T, 15T, 50T, 150T; the other levels are extrapolated (500T, 1.5Qa, 5Qa, 15Qa). Artifacts needed for upgrades are ignored.</li>
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
@@ -364,9 +375,9 @@ tbody tr:hover td { background: var(--sunk); }
   const $ = id => document.getElementById(id);
   const KEY = 'nexus-calculator-v2';
   const NEG = -Infinity, LN10 = Math.LN10;
-  const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'claimEvery', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
+  const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly',
     'other', 'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
-  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'paste'];
+  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
   const SERIES = [
@@ -389,10 +400,10 @@ tbody tr:hover td { background: var(--sunk); }
   }
   // example account, replaced by whatever the visitor enters (kept in this browser)
   const DEFAULTS = {
-    P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10, claimEvery: 12,
-    nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 12, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
+    P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
+    nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, other: 0, minGap: 6, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
     rP: 1000, rR: 100, rIB: 11.74,
-    bal: '6.6T', rawCap: '100B', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
+    bal: '6.6T', rawCap: '100B', activeFrom: '09:00', activeTo: '22:00', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
     prime: true, boost: true, loan: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
     rUseAcc: true, rReinvest: false
   };
@@ -500,14 +511,16 @@ tbody tr:hover td { background: var(--sunk); }
     c.bankLv = Math.min(20, Math.max(1, Math.round(num('bankLv', 15))));
     c.bankBonus = 1 + 0.05 * (c.bankLv - 1);
     c.storage = Math.max(4, 40 + 4 * (c.bankLv - 15));
-    c.claimEvery = Math.max(1, num('claimEvery', 12));
+    const hhmm = (id, d) => { const m = String($(id).value || '').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1] + +m[2] / 60) % 24 : d; };
+    c.activeFrom = hhmm('activeFrom', 9); c.activeTo = hhmm('activeTo', 22);
+    const now = new Date(NOW); c.clock0 = now.getHours() + now.getMinutes() / 60;
     c.rate = ((c.prime ? 1.25 : 0.25) + Math.max(0, num('artifact', 0))) / 100;
     const raw = parsePts($('rawCap').value);
     c.rawCap = isFinite(raw) && raw > 0 ? raw : 1e11;
     c.nextIn = { daily: num('nDaily', 24), prime: num('nPrime', 24), weekly: num('nWeekly', 168), monthly: num('nMonthly', 720) };
     c.loan = $('loan').checked;
     c.allowShop = $('allowShop').checked; c.allowBank = $('allowBank').checked; c.useRewards = $('useRewards').checked;
-    c.minGap = Math.max(1, num('minGap', 12));
+    c.minGap = Math.max(0.25, num('minGap', 6));
     c.maxClicks = Math.max(0, Math.round(num('maxClicks', 100)));
     c.lookahead = Math.max(3, num('lookahead', 14)) * 24;
     c.objective = $('objective').value;
@@ -596,7 +609,8 @@ tbody tr:hover td { background: var(--sunk); }
     $('bankDerived').textContent = '';
     $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'),
       ' · storage ', el('b', null, NF(0).format(cfg.storage) + ' h'), ' · keep at least ', el('b', null, fmtL(Math.log(M.reserveOf(cfg)))), ' in the bank for full interest');
-    if (cfg.claimEvery > cfg.storage) $('bankDerived').append(el('br'), el('b', null, `Storage fills in ${NF(0).format(cfg.storage)} h but you claim every ${NF(0).format(cfg.claimEvery)} h: you lose ${NF(0).format((1 - cfg.storage / cfg.claimEvery) * 100)}% of the interest.`));
+    const away = 24 - M.activeHours(cfg);
+    if (away > cfg.storage) $('bankDerived').append(el('br'), el('b', null, `You are away ${NF(1).format(away)} h a day but the storage fills in ${NF(0).format(cfg.storage)} h: you lose ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest.`));
   }
 
   // ---- planner rendering ----
@@ -670,9 +684,10 @@ tbody tr:hover td { background: var(--sunk); }
       if (now0.includes(b)) { stNow[b.key] = lv; if (b.lcost !== NEG) stNow.S = M.lSub(stNow.S, b.lcost); }
     }
 
-    const lost = cfg.claimEvery > cfg.storage;
-    ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), `. Then claim at least every ${NF(0).format(cfg.storage)} h: at bank Lv${cfg.bankLv} the storage is full after ${NF(0).format(cfg.storage)} h and stops filling.`,
-      lost ? ` You said you claim every ${NF(0).format(cfg.claimEvery)} h, so ${NF(0).format((1 - cfg.storage / cfg.claimEvery) * 100)}% of the interest is lost; the plan already counts that, and bank levels (+4 h each) are worth more to you.` : ''));
+    const away = 24 - M.activeHours(cfg);
+    ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), ', and again whenever you come back online.',
+      away > cfg.storage ? ` You are away ${NF(1).format(away)} h a day but at bank Lv${cfg.bankLv} the storage only holds ${NF(0).format(cfg.storage)} h, so ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest is lost; the plan already counts that, and bank levels (+4 h each) are worth more to you.`
+        : away > 0 ? ` The storage holds ${NF(0).format(cfg.storage)} h, more than your ${NF(1).format(away)} h away, so nothing is lost overnight.` : ''));
     if (now0.length) ol.append(li('Buy in the shard shop now: ', buysText(now0), '. Your Income Bonus becomes ', fmtIBL(M.lIB(cfg, stNow)), ', and the next Ascends pay it back.'));
     else if (cfg.allowShop && !pre0.length && !yield0.length) ol.append(li('Don’t buy shard upgrades yet: none of them pays off within ' + Math.round(cfg.lookahead / 24) + ' days.'));
 

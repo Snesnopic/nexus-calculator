@@ -42,13 +42,13 @@
       shards: 70, prime: true, server: 1.0, other: 0,
       res: 1, yld: 0, intr: 1, rew: 0, disc: 0,
       P: 1000, R: 1, bal: 6616699127772,
-      bankLv: 15, bankBonus: 1.70, rate: 0.1125, rawCap: 1e11, storage: 40, claimEvery: 12,
+      bankLv: 15, bankBonus: 1.70, rate: 0.1125, rawCap: 1e11, storage: 40, activeFrom: 9, activeTo: 22, clock0: 0,
       bankCosts: bankCostTable(),
       rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7 },
       cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
       nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720 },
       loan: true, floorShards: true, allowShop: true, allowBank: true,
-      minP: 1000, minBal: 0, minGap: 12, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
+      minP: 1000, minBal: 0, minGap: 1, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
       limitBits: Infinity, maxClicks: 100,
       objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000
     };
@@ -71,7 +71,15 @@
   function bankBonusOf(cfg, st) { return cfg.bankBonus + 0.05 * (st.bankLv - cfg.bankLv); }
   // storage grows 4h per bank level; claiming less often than it fills loses the excess hours
   function storageOf(cfg, st) { return Math.max(4, cfg.storage + 4 * (st.bankLv - cfg.bankLv)); }
-  function claimFactor(cfg, st) { return Math.min(1, storageOf(cfg, st) / Math.max(cfg.claimEvery, 1e-9)); }
+  // the player acts only inside a daily window of local hours; clock0 is the local hour at t = 0
+  function activeHours(cfg) { const a = ((cfg.activeTo - cfg.activeFrom) % 24 + 24) % 24; return a === 0 ? 24 : a; }
+  function nextActive(cfg, t) {
+    if (!isFinite(t) || activeHours(cfg) >= 24) return t;
+    const since = ((cfg.clock0 + t - cfg.activeFrom) % 24 + 24) % 24;
+    return since < activeHours(cfg) - 1e-9 ? t : t + (24 - since);
+  }
+  // interest piles up while you are away, but only for as many hours as the storage holds
+  function claimFactor(cfg, st) { return Math.min(1, (activeHours(cfg) + storageOf(cfg, st)) / 24); }
   function lRate(cfg, st) { return Math.log(cfg.rawCap * bankBonusOf(cfg, st) * claimFactor(cfg, st)) + lTenth(st.intr) + lIB(cfg, st); }
   function dOf(st) { return 1 - 0.05 * st.disc; }
   function lReserve(cfg) { return Math.log(reserveOf(cfg)); }
@@ -441,11 +449,11 @@
     let guard = 0;
     while (st.t < T - 1e-9 && guard++ < 400000) {
       const lI = lRate(cfg, st);
-      const tr = nextRewardTime(cfg, st);
+      const tr = nextActive(cfg, nextRewardTime(cfg, st));
       let te;
-      if (st.bankNeed !== NEG) te = st.t + Math.exp(lSub(st.bankNeed, st.L) - lI);
+      if (st.bankNeed !== NEG) te = nextActive(cfg, st.t + Math.exp(lSub(st.bankNeed, st.L) - lI));
       else if (st.target === HOLD) te = Infinity;
-      else te = Math.max(st.lastAsc + cfg.minGap, st.t + Math.exp(lSub(lAdd(lCostToP(st.target, dOf(st)), lMinBal), lAdd(st.Wp, st.L)) - lI));
+      else te = nextActive(cfg, Math.max(st.lastAsc + cfg.minGap, st.t + Math.exp(lSub(lAdd(lCostToP(st.target, dOf(st)), lMinBal), lAdd(st.Wp, st.L)) - lI)));
       const tn = Math.min(tr, te, T);
       advance(cfg, st, tn - st.t);
       if (limitCheck(cfg, st, log)) { st.stopped = true; break; }
@@ -595,7 +603,7 @@
   }
 
   const api = {
-    F, HOLD, NEG, LN10, defaults, storageOf, claimFactor, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
+    F, HOLD, NEG, LN10, defaults, storageOf, claimFactor, activeHours, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
     costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
