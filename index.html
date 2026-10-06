@@ -710,7 +710,10 @@ tbody tr:hover td { background: var(--sunk); }
       away > cfg.storage ? ` You are away ${NF(1).format(away)} h a day but at bank Lv${cfg.bankLv} the storage only holds ${NF(0).format(cfg.storage)} h, so ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest is lost; the plan already counts that, and bank levels (+4 h each) are worth more to you.`
         : away > 0 ? ` The storage holds ${NF(0).format(cfg.storage)} h, more than your ${NF(1).format(away)} h away, so nothing is lost overnight.` : ''));
     if (now0.length) ol.append(li('Buy in the shard shop now: ', buysText(now0), '. Your Income Bonus becomes ', fmtIBL(M.lIB(cfg, stNow)), ', and the next Ascends pay it back.'));
-    else if (cfg.allowShop && !pre0.length && !yield0.length) ol.append(li('Don’t buy shard upgrades yet: none of them pays off within ' + Math.round(cfg.lookahead / 24) + ' days.'));
+    else if (cfg.allowShop && !pre0.length && !yield0.length) {
+      ol.append(li(a && a.buys.some(b => b.key !== 'bank') ? 'Don’t buy shard upgrades now: they pay off more after the next Ascend (see below).'
+        : 'Don’t buy shard upgrades yet: none of them pays off within ' + Math.round(cfg.lookahead / 24) + ' days.'));
+    }
 
     const dailyIn = cfg.useRewards ? Math.max(0, Math.min(cfg.nextIn.daily, cfg.prime ? cfg.nextIn.prime : Infinity)) : Infinity;
     const canRaise = Pnow > cfg.P || (Pnow === cfg.P && cfg.R < 100);
@@ -742,7 +745,8 @@ tbody tr:hover td { background: var(--sunk); }
       const after = nowBuys(a.buys), preNext = prestigeBuys(a.buys), nextY = yieldBuys(a.buys);
       if (after.length) ol.append(li(a.restart > 0 ? `About ${fmtDur(a.restart)} later, once the bank is rebuilt, buy: ` : 'Right after that Ascend, buy: ', buysText(after), '.'));
       if (preNext.length) ol.append(li('The next time you buy prestige after that (your next /daily or Ascend), first buy ', buysText(preNext), '.'));
-      if (nextY.length) ol.append(li('Right before the Ascend after that, buy ', buysText(nextY), '.'));
+      const a2 = L.ascends[1], when2 = a2 ? fmtWhen(a2.t) : L.finalAscend ? fmtWhen(cfg.horizonH) : null;
+      if (nextY.length) ol.append(li('Right before the following Ascend' + (when2 ? ` (${when2})` : '') + ', buy ', buysText(nextY), '.'));
     } else if (cfg.objective !== 'bo2') {
       const fa = L.finalAscend;
       ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtIntL(fa.lP)} (+${fmtIntL(fa.lgain)} shards).` : 'You can’t reach P1000 before the date: keep buying prestige.'));
@@ -1051,7 +1055,7 @@ tbody tr:hover td { background: var(--sunk); }
       `Settings: min ${v('minGap')} h between Ascends, max ${v('maxClicks')} upgrade clicks per Ascend, decision window ${v('lookahead')} days, ` +
         `borrow ${on('loan')}, shard upgrades ${on('allowShop')}, bank levels ${on('allowBank')}, rewards ${on('useRewards')}`,
       `Goal: ${sel('objective')}${goal}, ${/^reach/.test(obj) ? 'search until' : 'date'} ${v('targetDate').replace('T', ' ')}, number limit ${sel('limitBits')}`,
-      `Now: Income Bonus ${$('roIB').textContent}, Income ${$('roPM').textContent}, bank ${$('roBank').textContent}`
+      `Now: Income Bonus ${$('roIB').textContent}, Income ${$('roPM').textContent}, bank per hour ${$('roBank').textContent}`
     ];
     if ($('out').classList.contains('busy') || !$('kpis').children.length) {
       out.push('', 'No results yet: ' + (flat($('warnings')) || 'still calculating.'));
