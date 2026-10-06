@@ -116,16 +116,6 @@
     for (let i = 0; i < 3 && 10 * (P / 1000) * (P / 1000) * y * (1 + 1e-12) < k; i++) P++;
     return Math.log(P);
   }
-  function lRho(cfg, st) {
-    if (!cfg.useRewards) return NEG;
-    const b = cfg.rewBase, c = cfg.cooldown;
-    let boosted = 0, plain = 0;
-    for (const k of KINDS) {
-      if (!hasKind(cfg, k)) continue;
-      if (REW_BOOSTED[k]) boosted += b[k] / c[k]; else plain += b[k] / c[k];
-    }
-    return lAdd(Math.log(boosted) + lTenth(st.rew), ln(plain));
-  }
   function blockSum(round) {
     let s = 0;
     for (let R = 10; R <= round; R += 5) s += Math.pow(1.4, R / 5 - 1);
@@ -195,15 +185,54 @@
   }
 
   // ---- P* maximizing the IB growth per hour ----
-  function growthAt(cfg, st, lP) {
+  // points gathered above the reserve during the cycle starting now, along its reward claims sorted by the hour
+  // they are taken (te); weekly and monthly kinds wait up to deferFrac of their cooldown for the Ascend.
+  // a claim pays on the prestige bought so far, so the path does not depend on the target
+  function cyclePath(cfg, st, tMax) {
+    const c = [];
+    if (cfg.useRewards) {
+      const lib = lIB(cfg, st), lb = lTenth(st.rew);
+      for (const k of KINDS) {
+        if (!hasKind(cfg, k)) continue;
+        const la = Math.log(cfg.rewBase[k]) + lib + (REW_BOOSTED[k] ? lb : 0);
+        const w = DEFERRED[k] ? cfg.deferFrac * cfg.cooldown[k] : 0;
+        let n = 0;
+        for (let tc = Math.max(0, st.next[k] - st.t); tc < tMax && n < 24; tc += cfg.cooldown[k], n++)
+          c.push({ t: tc, te: nextActive(cfg, st.t + tc + w) - st.t, la: la });
+      }
+      c.sort((x, y) => x.te - y.te);
+    }
+    const d = dOf(st), lI = lRate(cfg, st);
+    const before = new Array(c.length), after = new Array(c.length);
+    let lW = NEG, tau = 0;
+    for (let i = 0; i < c.length; i++) {
+      if (c[i].te > tau) { lW = lAdd(lW, lI + Math.log(c[i].te - tau)); tau = c[i].te; }
+      before[i] = lW;
+      lW = lAdd(lW, c[i].la + lPm(lW, d));
+      after[i] = lW;
+    }
+    return { c: c, before: before, after: after, lI: lI };
+  }
+  // claims still waiting when the target becomes affordable are taken right before the Ascend and raise the
+  // prestige reached
+  function growthAt(cfg, st, lP, path) {
     const d = dOf(st);
-    const lC = lCostToP(lP, d);
-    const lI = lRate(cfg, st);
+    const lNeed = lAdd(lCostToP(lP, d), Math.log(cfg.minBal));
     const lIB0 = lIB(cfg, st);
-    const lNeed = lAdd(lC, Math.log(cfg.minBal));
-    const lRr = lRho(cfg, st) + lIB0 + Math.log(100 * 2 / 3) + lP + lC - lNeed;
-    const dt = Math.max(cfg.minGap, Math.exp(lNeed - lAdd(lI, lRr)));
-    const lGain = lShardsAt(cfg, st, lP);
+    if (!path) path = cyclePath(cfg, st, Math.exp(lNeed - lRate(cfg, st)));
+    const c = path.c, n = c.length;
+    let i = 0, j = n;
+    while (i < j) { const m = (i + j) >> 1; if (path.after[m] < lNeed) i = m + 1; else j = m; }
+    let dt;
+    if (i < n && path.before[i] < lNeed) dt = c[i++].te;
+    else dt = (i > 0 ? c[i - 1].te : 0) + Math.exp(lSub(lNeed, i > 0 ? path.after[i - 1] : NEG) - path.lI);
+    dt = Math.max(cfg.minGap, dt);
+    let lEnd = lNeed;
+    const lpm = lPm(lNeed, d);
+    const tLast = dt + cfg.deferFrac * cfg.cooldown.monthly + 24;
+    for (; i < n && c[i].te <= tLast; i++) if (c[i].t <= dt) lEnd = lAdd(lEnd, c[i].la + lpm);
+    const lPend = lEnd > lNeed ? Math.max(lP, lPAff(lSub(lEnd, Math.log(cfg.minBal)), d)) : lP;
+    const lGain = lShardsAt(cfg, st, lPend);
     const lIB1 = lAdd(lIB0, lShardValue(cfg, st) + lGain);
     return (lIB1 - lIB0) / dt;
   }
@@ -218,18 +247,19 @@
   function pStar(cfg, st) {
     const lo = Math.log(cfg.minP);
     const hi = Math.max(lo + Math.log(400), Math.log(20) + lPAff(lRate(cfg, st) + Math.log(240), dOf(st)));
+    const path = cyclePath(cfg, st, Math.min(24 * 45, Math.exp(lCostToP(hi, dOf(st)) - lRate(cfg, st))));
     const N = 48;
     let best = lo, bg = -Infinity;
     for (let i = 0; i <= N; i++) {
       const x = lo + (hi - lo) * i / N;
-      const g = growthAt(cfg, st, x);
+      const g = growthAt(cfg, st, x, path);
       if (g > bg) { bg = g; best = x; }
     }
     let a = Math.max(lo, best - (hi - lo) / N), b = Math.min(hi, best + (hi - lo) / N);
     const phi = (Math.sqrt(5) - 1) / 2;
     for (let i = 0; i < 40; i++) {
       const x1 = b - phi * (b - a), x2 = a + phi * (b - a);
-      if (growthAt(cfg, st, x1) > growthAt(cfg, st, x2)) b = x2; else a = x1;
+      if (growthAt(cfg, st, x1, path) > growthAt(cfg, st, x2, path)) b = x2; else a = x1;
     }
     const lP = (a + b) / 2;
     if (cfg.floorShards && lShardsRaw(st, lP) < Math.log(1e6)) {
@@ -237,7 +267,7 @@
       let bk = snapTarget(cfg, st, lP), bgk = -Infinity;
       for (let k = Math.max(1, k0 - 4); k <= k0 + 5; k++) {
         const Pk = Math.max(lo, lMinPforShards(st, k));
-        const g = growthAt(cfg, st, Pk);
+        const g = growthAt(cfg, st, Pk, path);
         if (g > bgk) { bgk = g; bk = Pk; }
       }
       return bk;
