@@ -744,7 +744,7 @@ tbody tr:hover td { background: var(--sunk); }
       ol.append(li(...parts));
       const after = nowBuys(a.buys), preNext = prestigeBuys(a.buys), nextY = yieldBuys(a.buys);
       if (after.length) ol.append(li(a.restart > 0 ? `About ${fmtDur(a.restart)} later, once the bank is rebuilt, buy: ` : 'Right after that Ascend, buy: ', buysText(after), '.'));
-      if (preNext.length) ol.append(li('The next time you buy prestige after that (your next /daily or Ascend), first buy ', buysText(preNext), '.'));
+      if (preNext.length) ol.append(li(`The next time you buy prestige after that (your next ${cfg.useRewards ? '/daily or ' : ''}Ascend), first buy `, buysText(preNext), '.'));
       const a2 = L.ascends[1], when2 = a2 ? fmtWhen(a2.t) : L.finalAscend ? fmtWhen(cfg.horizonH) : null;
       if (nextY.length) ol.append(li('Right before the following Ascend' + (when2 ? ` (${when2})` : '') + ', buy ', buysText(nextY), '.'));
     } else if (cfg.objective !== 'bo2') {

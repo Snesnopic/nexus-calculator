@@ -124,6 +124,8 @@
 
   // ---- shard shop ----
   const BASE = { res: 5, yld: 5, intr: 5, rew: 3, disc: 5 };
+  // Rewards only raises reward claims: without them it is wasted shards
+  const shopKeys = cfg => cfg.useRewards ? ['res', 'yld', 'intr', 'rew', 'disc'] : ['res', 'yld', 'intr', 'disc'];
   // next level costs base * (L+1) (Interest Lv3 = 15 confirms it)
   function lUpgradeCost(st, key) {
     if (key === 'disc') return st.disc >= 5 ? Infinity : Math.log(5 * (st.disc + 1));
@@ -446,7 +448,7 @@
     for (let i = 0; i < 40 && clicks >= 1; i++) {
       const cur = score(st);
       let best = null, bv = cur + 1e-6;
-      for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
+      for (const k of shopKeys(cfg)) {
         if (lUpgradeCost(st, k) > spendable(st)) continue;
         const n = Math.min(Math.log(clicks), Math.max(0, lLevelsWithin(st, k, spendable(st) + Math.log(0.02))));
         const s = clone(st);
@@ -534,7 +536,7 @@
     const out = [];
     if (clicks < 1) return out;
     if (cfg.allowShop) {
-      for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) {
+      for (const k of shopKeys(cfg)) {
         if (lUpgradeCost(st, k) > spendable(st)) continue;
         const sp = spendable(st), cap = Math.log(clicks);
         const steps = new Set([0, Math.min(cap, lLevelsWithin(st, k, sp + Math.log(0.04))), Math.min(cap, lLevelsWithin(st, k, sp + Math.log(0.15)))]);
