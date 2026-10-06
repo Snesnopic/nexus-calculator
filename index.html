@@ -82,6 +82,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
 .check input { width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
 .checks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 10px; }
 button { font: inherit; font-weight: 600; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--on-accent); padding: 7px 14px; cursor: pointer; }
+button.ghost { background: transparent; color: var(--accent); }
+.export { width: 100%; margin-top: 10px; min-height: 160px; }
 .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .hint { font-size: 0.78rem; color: var(--muted); margin: 0; }
 .msg { font-size: 0.8rem; color: var(--ink-2); margin: 0; }
@@ -296,7 +298,10 @@ tbody tr:hover td { background: var(--sunk); }
             <div class="f narrow bo2only"><label for="round">Last round</label><input class="num" id="round" type="number" min="10" max="255" step="5"></div>
             <label class="check bo2only"><input id="reinvest" type="checkbox"> Buy prestige during the run</label>
             <button id="calcBtn" type="button">Recalculate</button>
+            <button id="copyBtn" class="ghost" type="button">Copy as text</button>
+            <p id="copyMsg" class="msg" aria-live="polite"></p>
           </div>
+          <textarea id="copyOut" class="export" readonly hidden aria-label="Inputs and results as text"></textarea>
         </div>
 
         <div id="out" class="results">
@@ -1026,6 +1031,71 @@ tbody tr:hover td { background: var(--sunk); }
     run();
   });
   $('calcBtn').addEventListener('click', run);
+
+  // ---- inputs and results as plain text, to paste in a chat ----
+  function exportText() {
+    const v = id => $(id).value;
+    const sel = id => { const e = $(id); return e.selectedIndex >= 0 ? e.options[e.selectedIndex].text : e.value; };
+    const on = id => $(id).checked ? 'on' : 'off';
+    const flat = e => e.textContent.replace(/\s+/g, ' ').trim();
+    const obj = v('objective');
+    const goal = obj === 'reach' ? `, target IB ${v('targetIB')}` : obj === 'reachRate' ? `, target ${v('targetRate')}/hr`
+      : obj === 'bo2' ? `, last round ${v('round')}, buy prestige during the run ${on('reinvest')}` : '';
+    const out = [
+      'Nexus calculator, ' + new Date(NOW).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' local time',
+      `Account: P${v('P')} R${v('R')}, bank ${v('bal')}, ${v('shards')} unspent shards, Prime ${on('prime')}, server booster ${on('boost')}, other IB +${v('other') || 0}`,
+      `Shard upgrades: Resonance ${v('res')}, Yield ${v('yld')}, Interest ${v('intr')}, Rewards ${v('rew')}, Discount ${v('disc')}`,
+      `Bank: level ${v('bankLv')}, artifact +${v('artifact')}%/hr, raw cap ${v('rawCap')}/hr`,
+      `Online: ${v('activeFrom')}–${v('activeTo')}`,
+      `Hours to next reward: daily ${v('nDaily')}, primedaily ${v('nPrime')}, weekly ${v('nWeekly')}, monthly ${v('nMonthly')}, primeweekly ${v('nPWeekly')}, primemonthly ${v('nPMonthly')}`,
+      `Settings: min ${v('minGap')} h between Ascends, max ${v('maxClicks')} upgrade clicks per Ascend, decision window ${v('lookahead')} days, ` +
+        `borrow ${on('loan')}, shard upgrades ${on('allowShop')}, bank levels ${on('allowBank')}, rewards ${on('useRewards')}`,
+      `Goal: ${sel('objective')}${goal}, ${/^reach/.test(obj) ? 'search until' : 'date'} ${v('targetDate').replace('T', ' ')}, number limit ${sel('limitBits')}`,
+      `Now: Income Bonus ${$('roIB').textContent}, Income ${$('roPM').textContent}, bank ${$('roBank').textContent}`
+    ];
+    if ($('out').classList.contains('busy') || !$('kpis').children.length) {
+      out.push('', 'No results yet: ' + (flat($('warnings')) || 'still calculating.'));
+      return out.join('\n');
+    }
+    out.push('', 'Results:');
+    for (const k of $('kpis').children) {
+      const [a, b, c] = [...k.children].map(flat);
+      out.push(`- ${a}: ${b}` + (c ? ` (${c})` : ''));
+    }
+    if (flat($('warnings'))) out.push('- ' + flat($('warnings')));
+    out.push('', 'What to do now:');
+    [...$('actions').children].forEach((li, i) => out.push(`${i + 1}. ${flat(li)}`));
+    const table = (id, max) => {
+      const rows = [...$(id).querySelectorAll('tr')];
+      rows.slice(0, max + 1).forEach(tr => out.push([...tr.children].map(flat).join(' | ')));
+      if (rows.length > max + 1) out.push(`… ${rows.length - max - 1} more rows`);
+    };
+    out.push('', 'Ascend plan:');
+    table('planTable', 15);
+    out.push('', 'Strategies compared:');
+    table('cmpTable', 10);
+    return out.join('\n');
+  }
+  async function copyText(t) {
+    try { await navigator.clipboard.writeText(t); return true; } catch (e) { /* blocked, e.g. inside a frame */ }
+    const ta = el('textarea');
+    ta.value = t; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.append(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  $('copyBtn').addEventListener('click', async () => {
+    const t = exportText();
+    const ok = await copyText(t);
+    const m = $('copyMsg'), box = $('copyOut');
+    m.className = 'msg ' + (ok ? 'ok' : 'bad');
+    m.textContent = ok ? 'Copied to the clipboard.' : 'Copying is blocked here: select the text below and copy it.';
+    box.value = t;
+    box.hidden = ok;
+    if (!ok) { box.focus(); box.select(); }
+  });
   document.querySelectorAll('.rail input, .rail select, .objbar input, .objbar select').forEach(e => {
     if (e.id !== 'paste') e.addEventListener('change', schedule);
   });
