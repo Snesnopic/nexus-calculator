@@ -633,7 +633,7 @@
     const T = cfg.horizonH;
     const st0 = initState(cfg, 0);
     settleHeld(cfg, st0);
-    const budget = { left: cfg.budget || 500 };
+    const budget = { left: cfg.budget || 2000 };
     const res = {
       cfg: cfg,
       now: { lib: lIB(cfg, st0), lrate: lRate(cfg, st0), pm: cfg.R * (cfg.P + 1) },

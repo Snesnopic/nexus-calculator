@@ -548,7 +548,7 @@ tbody tr:hover td { background: var(--sunk); }
     $('targetRate').classList.toggle('bad', !isFinite(tr));
     c.limitBits = $('limitBits').value === 'none' ? Infinity : parseInt($('limitBits').value, 10);
     c.horizonH = (new Date($('targetDate').value).getTime() - NOW) / 3600e3;
-    c.budget = 500;
+    c.budget = 2000;
     return c;
   }
 
