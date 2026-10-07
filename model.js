@@ -31,23 +31,28 @@
   }
   const lTenth = lL => lAdd(0, lL + Math.log(0.1));   // ln(1 + 0.1 L)
 
-  // known: Lv12 1.5T .. Lv16 150T; the rest follows the same x3.33 / x3 alternation
+  // known: Lv12 1.5T .. Lv18 750T. Below Lv12 the x3.33 / x3 alternation continues downwards; from Lv15 each level
+  // costs twice the previous plus 50T (50T, 150T, 350T, 750T), extrapolated to Lv19 and Lv20
   function bankCostTable() {
     const t = {};
-    for (let L = 2; L <= 20; L++) {
+    for (let L = 2; L <= 14; L++) {
       const k = L - 16;
       const e = Math.floor(k / 2), odd = ((k % 2) + 2) % 2;
       t[L] = (odd ? 500e12 : 150e12) * Math.pow(10, e);
     }
+    t[15] = 50e12;
+    for (let L = 16; L <= 20; L++) t[L] = 2 * t[L - 1] + 50e12;
     return t;
   }
+  // known: Lv14 36h, Lv15 40h, Lv16 48h, Lv17 56h; 4h per level below, 8h per level above (extrapolated)
+  function storageAt(L) { return L <= 15 ? Math.max(4, 40 + 4 * (L - 15)) : 40 + 8 * (L - 15); }
 
   function defaults() {
     return {
       shards: 70, prime: true, server: 1.0, other: 0,
       res: 1, yld: 0, intr: 1, rew: 0, disc: 0,
       P: 1000, R: 1, bal: 6616699127772,
-      bankLv: 15, bankBonus: 1.70, rate: 0.1125, rawCap: 1e11, storage: 40, activeFrom: 9, activeTo: 22, clock0: 0,
+      bankLv: 15, bankBonus: 1.70, rate: 0.1125, rawCap: 1e11, activeFrom: 9, activeTo: 22, clock0: 0,
       bankCosts: bankCostTable(),
       rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7, pweekly: 1e6, pmonthly: 1e7 },
       cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720, pweekly: 168, pmonthly: 720 },
@@ -74,8 +79,8 @@
   function lShardValue(cfg, st) { return Math.log(cfg.prime ? 0.12 : 0.10) + lTenth(st.res); }
   function lIB(cfg, st) { return lAdd(Math.log(constIB(cfg)), lShardValue(cfg, st) + st.S); }
   function bankBonusOf(cfg, st) { return cfg.bankBonus + 0.05 * (st.bankLv - cfg.bankLv); }
-  // storage grows 4h per bank level; claiming less often than it fills loses the excess hours
-  function storageOf(cfg, st) { return Math.max(4, cfg.storage + 4 * (st.bankLv - cfg.bankLv)); }
+  // claiming less often than the storage fills loses the excess hours
+  function storageOf(cfg, st) { return storageAt(st.bankLv); }
   // the player acts only inside a daily window of local hours; clock0 is the local hour at t = 0
   function activeHours(cfg) { const a = ((cfg.activeTo - cfg.activeFrom) % 24 + 24) % 24; return a === 0 ? 24 : a; }
   function nextActive(cfg, t) {
@@ -647,7 +652,7 @@
   }
 
   const api = {
-    F, HOLD, NEG, LN10, defaults, storageOf, claimFactor, activeHours, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
+    F, HOLD, NEG, LN10, defaults, storageAt, storageOf, claimFactor, activeHours, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
     costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

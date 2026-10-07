@@ -338,9 +338,9 @@ tbody tr:hover td { background: var(--sunk); }
               <ul>
                 <li><b>Income Bonus</b> = 1 + 0.5 (Prime) + server booster + other bonuses (these two together cap at 10) + unspent shards × 0.12 (0.10 without Prime) × (1 + 0.1 × Resonance). Matches /stats.</li>
                 <li><b>Bank</b>: raw per hour = min(balance × interest rate, 100B). A claim pays raw × bank bonus × (1 + 0.1 × Interest) × Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance needed for the full raw is 100B ÷ interest rate (0.89T at 11.25%/hr); the plan always keeps that much, and it is also the loan you need after an Ascend to claim the stored hours at full rate. Without a loan the plan assumes you rebuild that balance from /daily and /primedaily by claiming often, and loses the hours it takes. Matches /bank.</li>
-                <li><b>Online hours</b>: Ascends, shop purchases, prestige purchases and reward claims only happen between <b>From</b> and <b>Until</b>; a reward that becomes ready while you are away is claimed when you come back, and its cooldown restarts from then. Interest piles up while you are away for at most 40 h at bank Lv15 (+4 h per level); if you are away longer than that every day, the plan counts the lost hours. Stored hours survive an Ascend.</li>
+                <li><b>Online hours</b>: Ascends, shop purchases, prestige purchases and reward claims only happen between <b>From</b> and <b>Until</b>; a reward that becomes ready while you are away is claimed when you come back, and its cooldown restarts from then. Interest piles up while you are away for at most 40 h at bank Lv15, 48 h at Lv16 and 56 h at Lv17 (4 h per level below, 8 h per level above, extrapolated); if you are away longer than that every day, the plan counts the lost hours. Stored hours survive an Ascend.</li>
                 <li><b>Min hours between Ascends</b>: without a bank minimum every point buys about the same shards, so Ascending more often than every few hours barely helps; it mostly adds clicks and makes the calculation slower.</li>
-                <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–16 cost 1.5T, 5T, 15T, 50T, 150T; the other levels are extrapolated (500T, 1.5Qa, 5Qa, 15Qa). Artifacts needed for upgrades are ignored.</li>
+                <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–18 cost 1.5T, 5T, 15T, 50T, 150T, 350T, 750T. From Lv15 each level costs twice the previous one plus 50T, so Lv19 and Lv20 are extrapolated as 1.55Qa and 3.15Qa. The artifacts needed for upgrades (Legendary for Lv15–16, Mythic for Lv17–18) are ignored.</li>
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
                 <li><b>Rewards</b>: daily and primedaily 100,000, weekly and primeweekly 1,000,000, monthly and primemonthly 10,000,000, each × Income × Income Bonus; the Rewards upgrade adds 10% per level to daily, weekly, monthly and primedaily. The plan holds the weekly and monthly ones for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
@@ -526,7 +526,7 @@ tbody tr:hover td { background: var(--sunk); }
     c.bal = isFinite(bal) ? bal : 0;
     c.bankLv = Math.min(20, Math.max(1, Math.round(num('bankLv', 15))));
     c.bankBonus = 1 + 0.05 * (c.bankLv - 1);
-    c.storage = Math.max(4, 40 + 4 * (c.bankLv - 15));
+    c.storage = M.storageAt(c.bankLv);
     const hhmm = (id, d) => { const m = String($(id).value || '').match(/^(\d{1,2}):(\d{2})/); return m ? (+m[1] + +m[2] / 60) % 24 : d; };
     c.activeFrom = hhmm('activeFrom', 9); c.activeTo = hhmm('activeTo', 22);
     const now = new Date(NOW); c.clock0 = now.getHours() + now.getMinutes() / 60;
@@ -707,7 +707,7 @@ tbody tr:hover td { background: var(--sunk); }
 
     const away = 24 - M.activeHours(cfg);
     ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), ', and again whenever you come back online.',
-      away > cfg.storage ? ` You are away ${NF(1).format(away)} h a day but at bank Lv${cfg.bankLv} the storage only holds ${NF(0).format(cfg.storage)} h, so ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest is lost; the plan already counts that, and bank levels (+4 h each) are worth more to you.`
+      away > cfg.storage ? ` You are away ${NF(1).format(away)} h a day but at bank Lv${cfg.bankLv} the storage only holds ${NF(0).format(cfg.storage)} h, so ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest is lost; the plan already counts that, and bank levels (the next one adds ${NF(0).format(M.storageAt(cfg.bankLv + 1) - cfg.storage)} h) are worth more to you.`
         : away > 0 ? ` The storage holds ${NF(0).format(cfg.storage)} h, more than your ${NF(1).format(away)} h away, so nothing is lost overnight.` : ''));
     if (now0.length) ol.append(li('Buy in the shard shop now: ', buysText(now0), '. Your Income Bonus becomes ', fmtIBL(M.lIB(cfg, stNow)), ', and the next Ascends pay it back.'));
     else if (cfg.allowShop && !pre0.length && !yield0.length) {
