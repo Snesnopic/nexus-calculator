@@ -340,7 +340,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Bank</b>: raw per hour = min(balance × interest rate, 100B). A claim pays raw × bank bonus × (1 + 0.1 × Interest) × Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance needed for the full raw is 100B ÷ interest rate (0.89T at 11.25%/hr); the plan always keeps that much, and it is also the loan you need after an Ascend to claim the stored hours at full rate. Without a loan the plan assumes you rebuild that balance from /daily and /primedaily by claiming often, and loses the hours it takes. Matches /bank.</li>
                 <li><b>Online hours</b>: Ascends, shop purchases, prestige purchases and reward claims only happen between <b>From</b> and <b>Until</b>; a reward that becomes ready while you are away is claimed when you come back, and its cooldown restarts from then. Interest piles up while you are away for at most 40 h at bank Lv15, 48 h at Lv16 and 56 h at Lv17 (4 h per level below, 8 h per level above, extrapolated); if you are away longer than that every day, the plan counts the lost hours. Stored hours survive an Ascend.</li>
                 <li><b>Min hours between Ascends</b>: without a bank minimum every point buys about the same shards, so Ascending more often than every few hours barely helps; it mostly adds clicks and makes the calculation slower.</li>
-                <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–18 cost 1.5T, 5T, 15T, 50T, 150T, 350T, 750T. From Lv15 each level costs twice the previous one plus 50T, so Lv19 and Lv20 are extrapolated as 1.55Qa and 3.15Qa. The artifacts needed for upgrades (Legendary for Lv15–16, Mythic for Lv17–18) are ignored.</li>
+                <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%). Lv12–18 cost 1.5T, 5T, 15T, 50T, 150T, 350T, 750T. From Lv15 each level costs twice the previous one plus 50T, so Lv19 and Lv20 are extrapolated as 1.55Qa and 3.15Qa. The plan ignores the artifacts the upgrades also need (10, 25 and 45 Legendary for Lv14–16, 15 and 30 Mythic for Lv17–18): check you have them.</li>
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
                 <li><b>Rewards</b>: daily and primedaily 100,000, weekly and primeweekly 1,000,000, monthly and primemonthly 10,000,000, each × Income × Income Bonus; the Rewards upgrade adds 10% per level to daily, weekly, monthly and primedaily. The plan holds the weekly and monthly ones for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
@@ -396,6 +396,8 @@ tbody tr:hover td { background: var(--sunk); }
   const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
+  // artifacts the bot asks for each bank level (Lv19 and Lv20 unknown)
+  const BANK_ARTIFACTS = { 14: '10 Legendary artifacts', 15: '25 Legendary artifacts', 16: '45 Legendary artifacts', 17: '15 Mythic artifacts', 18: '30 Mythic artifacts' };
   const SERIES = [
     { name: 'Recommended plan', short: 'Plan', color: 'var(--s1)' },
     { name: 'P* without upgrades', short: 'P*', color: 'var(--s2)' },
@@ -602,7 +604,7 @@ tbody tr:hover td { background: var(--sunk); }
     return out;
   }
   function buyText(b) {
-    if (b.key === 'bank') return `Bank Lv${fmtIntL(b.lto)} (${fmtL(b.lcost)})`;
+    if (b.key === 'bank') return `bank Lv${fmtIntL(b.lto)} (${fmtL(b.lcost)} in points)`;
     return `${NAMES[b.key]} ${fmtIntL(b.lfrom)}→${fmtIntL(b.lto)}` + (b.lcost === NEG ? '' : ` (${fmtIntL(b.lcost)} shards)`);
   }
   const buysText = list => mergeBuys(list).map(buyText).join(', ');
@@ -709,10 +711,19 @@ tbody tr:hover td { background: var(--sunk); }
     ol.append(li('Claim your stored interest: ', cmd('/claiminterest'), ', and again whenever you come back online.',
       away > cfg.storage ? ` You are away ${NF(1).format(away)} h a day but at bank Lv${cfg.bankLv} the storage only holds ${NF(0).format(cfg.storage)} h, so ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest is lost; the plan already counts that, and bank levels (the next one adds ${NF(0).format(M.storageAt(cfg.bankLv + 1) - cfg.storage)} h) are worth more to you.`
         : away > 0 ? ` The storage holds ${NF(0).format(cfg.storage)} h, more than your ${NF(1).format(away)} h away, so nothing is lost overnight.` : ''));
-    if (now0.length) ol.append(li('Buy in the shard shop now: ', buysText(now0), '. Your Income Bonus becomes ', fmtIBL(M.lIB(cfg, stNow)), ', and the next Ascends pay it back.'));
+    const shop0 = now0.filter(b => b.key !== 'bank'), bank0 = buys0.filter(b => b.key === 'bank');
+    if (shop0.length) ol.append(li('Buy in the shard shop now: ', buysText(shop0), '. Your Income Bonus becomes ', fmtIBL(M.lIB(cfg, stNow)), ', and the next Ascends pay it back.'));
     else if (cfg.allowShop && !pre0.length && !yield0.length) {
       ol.append(li(a && a.buys.some(b => b.key !== 'bank') ? 'Don’t buy shard upgrades now: they pay off more after the next Ascend (see below).'
         : 'Don’t buy shard upgrades yet: none of them pays off within ' + Math.round(cfg.lookahead / 24) + ' days.'));
+    }
+
+    for (const b of bank0) {
+      const lv = Math.round(Math.exp(b.lto)), done = L.bank.find(x => x.lv === lv);
+      const art = BANK_ARTIFACTS[lv];
+      ol.append(li(`Upgrade the bank to Lv${lv} with points, not shards: ${fmtL(b.lcost)}${art ? ' and ' + art : ''}. `,
+        done && done.t > 0.05 ? `The plan does it on ${fmtWhen(done.t)}, once the bank holds that much on top of what it needs for full interest. ` : '',
+        `It gives +5% bank bonus and ${NF(0).format(M.storageAt(lv) - M.storageAt(lv - 1))} h more storage.`));
     }
 
     const dailyIn = cfg.useRewards ? Math.max(0, Math.min(cfg.nextIn.daily, cfg.prime ? cfg.nextIn.prime : Infinity)) : Infinity;
