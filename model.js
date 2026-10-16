@@ -467,7 +467,7 @@
       const lib = lIB(cfg, st);
       const b = bo2Run(cfg, lAdd(st.Wp, lSub(st.L, lReserve(cfg))), lib, dOf(st));
       if (log) log.final = { lpm: b.lpm0, lpmEnd: b.lpm, lib: lib, lreward: b.tot };
-      return b.tot;
+      return st.limitAt !== undefined ? limitValue(st) : b.tot;
     }
     const fs = clone(st);
     // a bank upgrade still saving up on the date is dropped: its points go into the last Ascend
@@ -486,8 +486,12 @@
       if (metricOf(cfg, fs) >= goalOf(cfg)) { if (log) log.reachedAt = st.t; return reachValue(cfg, st.t); }
       return metricOf(cfg, fs);
     }
+    if (st.limitAt !== undefined) return limitValue(st);
     return cfg.objective === 'income' ? lRate(cfg, fs) : lIB(cfg, fs);
   }
+  // past the number limit nothing more can be had, so reaching it sooner is better; any ln value under a limit of at
+  // most ~14,300 bits stays far below 1e7
+  const limitValue = st => 1e7 - st.limitAt;
 
   // cheap myopic rule used inside rollouts: buy while ln(IB) + growth until min(one week, horizon) improves.
   // bank levels only when withBank (the plan after the rollout budget): inside rollouts they delay every goal
@@ -536,7 +540,7 @@
 
   function limitCheck(cfg, st, log) {
     const lW = lAdd(st.Wp, st.L);
-    if (lW > cfg.limitBits * LN2) { if (log) log.limitAt = st.t; return true; }
+    if (lW > cfg.limitBits * LN2) { st.limitAt = st.t; if (log) log.limitAt = st.t; return true; }
     if (lW > L_MAX || st.S > L_MAX) { if (log) log.overflowAt = st.t; return true; }
     return false;
   }
