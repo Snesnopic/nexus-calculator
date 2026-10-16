@@ -345,7 +345,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
                 <li><b>Rewards</b>: daily and primedaily 100,000, weekly and primeweekly 1,000,000, monthly and primemonthly 10,000,000, each × Income × Income Bonus; the Rewards upgrade adds 10% per level to daily, weekly, monthly and primedaily. The plan holds the weekly and monthly ones for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
                 <li><b>Ascend</b>: only needs P ≥ 1000 and burns the whole bank, so the plan spends it all on prestige right before. It gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards rounded down; rank doesn't count (confirmed: P1339 → 17, P2391 → 57, P2571 → 66). Since both the shards and the cost of prestige grow with P², every point buys about the same shards at any prestige: Ascending often wins, and <b>Min hours between Ascends</b> sets how often you are willing to act.</li>
-                <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Resonance and Interest raise income at once and are bought as soon as the plan picks them. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus.</li>
+                <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Resonance and Interest raise income at once and are bought as soon as the plan picks them. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus. On the goal date nothing comes after, so the shards left go into Resonance (and Interest when the goal is bank income), up to the click limit.</li>
                 <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5), as the shards guide says. Each click in the bot buys one level, so <b>Max upgrade clicks per Ascend</b> caps how many levels the plan buys after each Ascend. Levels add up rather than compound: an Interest Lv2 claim pays exactly ×1.20 (not ×1.21), and Resonance Lv1 gives 0.132x per shard with Prime, 0.11x without.</li>
                 <li><b>Why far projections explode</b>: with linear costs, the levels you can afford grow with the square root of your shards, so each Ascend multiplies the next one. Separately, daily, weekly and monthly pay Income × IB: once prestige is in the hundreds of thousands they outgrow the bank, and spending them on prestige before an Ascend turns them into shards with the square of prestige. Either loop makes the number of digits, not the number itself, grow every day.</li>
                 <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
@@ -395,6 +395,7 @@ tbody tr:hover td { background: var(--sunk); }
     'other', 'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
+  const KIND_CMD = { daily: '/daily', prime: '/primedaily', weekly: '/weekly', monthly: '/monthly', pweekly: '/primeweekly', pmonthly: '/primemonthly' };
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
   // artifacts the bot asks for each bank level (Lv19 and Lv20 unknown)
   const BANK_ARTIFACTS = { 14: '10 Legendary artifacts', 15: '25 Legendary artifacts', 16: '45 Legendary artifacts', 17: '15 Mythic artifacts', 18: '30 Mythic artifacts' };
@@ -671,6 +672,10 @@ tbody tr:hover td { background: var(--sunk); }
       w.append(el('p', { class: 'note' }, el('strong', null, 'The projection stops on ' + fmtWhen(L.overflowAt) + '. '),
         'Past 10^(10^300) the numbers are beyond what the calculator can represent.'));
     }
+    if (L.fallbackAt !== undefined && L.fallbackAt < end) {
+      w.append(el('p', { class: 'note' }, el('strong', null, 'From ' + fmtWhen(L.fallbackAt) + ' the plan is rougher. '),
+        'The planner had used all its simulations by then, so later Ascends and purchases follow a simpler rule. Recalculate after a few Ascends for a sharper plan.'));
+    }
     if (cfg.horizonH >= 24 * MAX_DAYS - 1) {
       w.append(el('p', { class: 'note' }, el('strong', null, 'Projections stop after 3 years. '), 'Pick an earlier date for an exact horizon.'));
     }
@@ -746,7 +751,14 @@ tbody tr:hover td { background: var(--sunk); }
       const parts = [`Next Ascend at P${fmtIntL(a.lP)} ${a.t < 0.05 ? 'right now' : 'on ' + fmtWhen(a.t) + ' (in ' + fmtDur(a.t) + ')'}, about ${fmtL(lnOf(M.costToPD(Pa, d)))} of prestige in total. Order: `,
         cmd('/claiminterest'), ', '];
       if (!preAtDaily && pre0.length) parts.push('buy ', buysText(pre0), ', ');
-      parts.push(cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), cfg.prime ? ', claim weekly, monthly, primeweekly and primemonthly if ready, ' : ', claim weekly and monthly if ready, ');
+      const claimed = L.rewards.filter(r => Math.abs(r.t - a.t) < 1e-6).map(r => KIND_CMD[r.kind]);
+      const Ppre = a.lPpre !== undefined && isFinite(a.lPpre) ? Math.round(Math.exp(a.lPpre)) : Pa;
+      if (claimed.length && Ppre < Pa) {
+        parts.push(cmd('/prestigeupto ' + (Ppre - 1)), ', ', cmd('/rankupmax'), ' (P' + fmtInt(Ppre - 1) + ' R100, the most Income your points buy before the rewards), claim ',
+          ...claimed.flatMap((k, j) => [j ? ', ' : '', cmd(k)]), ', ');
+      } else {
+        parts.push(cmd('/prestigeupto ' + (Pa - 1)), ', ', cmd('/rankupmax'), cfg.prime ? ', claim weekly, monthly, primeweekly and primemonthly if ready, ' : ', claim weekly and monthly if ready, ');
+      }
       if (yield0.length) parts.push('buy ', buysText(yield0), ' only now, since it just boosts this Ascend, ');
       parts.push(cmd('/maxprestige'), ' (the whole bank is burned, so spend all of it), ', cmd('/ascend'));
       if (cfg.loan) parts.push(`. Then borrow ${fmtL(lnOf(reserve))}, `, cmd('/claiminterest'), ' and pay it back.');
@@ -880,8 +892,12 @@ tbody tr:hover td { background: var(--sunk); }
       el('th', { class: 'r' }, 'IB after'), el('th', { class: 'r' }, 'Bank/hr after'), el('th', null, 'Notes'))));
     const body = el('tbody');
     const rows = L.ascends.map((a, i) => ({ a: a, i: i }));
-    if (L.finalAscend) rows.push({ a: Object.assign({ buys: [] }, L.finalAscend, { t: cfg.horizonH }), i: L.ascends.length, final: true });
-    if (!rows.length) body.append(el('tr', null, el('td', { colspan: 7 }, 'No Ascend before the date.')));
+    if (L.finalAscend) {
+      const fa = Object.assign({ buys: [] }, L.finalAscend, { t: cfg.horizonH });
+      if (L.finalBuys && L.final) { fa.lib = L.final.lib; fa.lrate = L.final.lrate; }
+      rows.push({ a: fa, i: L.ascends.length, final: true });
+    }
+    if (!rows.length && !L.finalBuys) body.append(el('tr', null, el('td', { colspan: 7 }, 'No Ascend before the date.')));
     const HEAD = 40, TAIL = 8;
     rows.forEach(({ a, i, final }, idx) => {
       if (rows.length > HEAD + TAIL + 1 && idx >= HEAD && idx < rows.length - TAIL) {
@@ -897,11 +913,14 @@ tbody tr:hover td { background: var(--sunk); }
       const after = nowBuys(a.buys || []), preNext = prestigeBuys(a.buys || []);
       if (after.length) notes.append((a.restart > 0 ? 'After that, buy ' : 'then buy ') + buysText(after) + '. ');
       if (preNext.length) notes.append('Next time you buy prestige, first buy ' + buysText(preNext) + '. ');
-      if (final) notes.append('on the goal date. ');
+      if (final) notes.append('on the goal date. ' + (L.finalBuys ? 'Then buy ' + buysText(L.finalBuys) + ': nothing comes after, so the shards are worth more as levels. ' : ''));
       body.append(el('tr', null,
         el('td', { class: 'n' }, NF(0).format(i + 1)), el('td', { class: 'n' }, fmtWhen(a.t)), el('td', { class: 'n' }, 'P' + fmtIntL(a.lP)),
         el('td', { class: 'n r' }, '+' + fmtIntL(a.lgain)), el('td', { class: 'n r' }, fmtIBL(a.lib)), el('td', { class: 'n r' }, fmtL(a.lrate)), notes));
     });
+    if (L.finalBuys && !L.finalAscend) {
+      body.append(el('tr', null, el('td', { colspan: 7 }, `On the goal date (${fmtWhen(cfg.horizonH)}), buy ${buysText(L.finalBuys)}: nothing comes after, so the shards are worth more as levels.`)));
+    }
     tb.append(body);
   }
 
