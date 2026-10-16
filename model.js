@@ -31,8 +31,8 @@
   }
   const lTenth = lL => lAdd(0, lL + Math.log(0.1));   // ln(1 + 0.1 L)
 
-  // known: Lv12 1.5T .. Lv18 750T. Below Lv12 the x3.33 / x3 alternation continues downwards; from Lv15 each level
-  // costs twice the previous plus 50T (50T, 150T, 350T, 750T), extrapolated to Lv19 and Lv20
+  // known: Lv12 1.5T .. Lv19 1.5Qa. Below Lv12 the x3.33 / x3 alternation continues downwards; Lv20 is extrapolated
+  // as twice Lv19, like Lv19 is twice Lv18
   function bankCostTable() {
     const t = {};
     for (let L = 2; L <= 14; L++) {
@@ -40,11 +40,10 @@
       const e = Math.floor(k / 2), odd = ((k % 2) + 2) % 2;
       t[L] = (odd ? 500e12 : 150e12) * Math.pow(10, e);
     }
-    t[15] = 50e12;
-    for (let L = 16; L <= 20; L++) t[L] = 2 * t[L - 1] + 50e12;
+    Object.assign(t, { 15: 50e12, 16: 150e12, 17: 350e12, 18: 750e12, 19: 1.5e15, 20: 3e15 });
     return t;
   }
-  // known: Lv14 36h, Lv15 40h, Lv16 48h, Lv17 56h; 4h per level below, 8h per level above (extrapolated)
+  // known: Lv13 32h .. Lv15 40h (4h per level), Lv16 48h, Lv17 56h, Lv18 64h (8h per level, extrapolated above)
   function storageAt(L) { return L <= 15 ? Math.max(4, 40 + 4 * (L - 15)) : 40 + 8 * (L - 15); }
 
   function defaults() {
