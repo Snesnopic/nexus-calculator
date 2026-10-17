@@ -42,8 +42,8 @@
     Object.assign(t, { 15: 50e12, 16: 150e12, 17: 350e12, 18: 750e12, 19: 1.5e15, 20: 3e15 });
     return t;
   }
-  // known: Lv13 32h .. Lv15 40h (4h per level), Lv16 48h .. Lv19 72h (8h per level); Lv20 80h extrapolated
-  function storageAt(L) { return L <= 15 ? Math.max(4, 40 + 4 * (L - 15)) : 40 + 8 * (L - 15); }
+  // known: Lv13 32h .. Lv15 40h (4h per level), Lv16 48h .. Lv19 72h (8h per level), Lv20 96h
+  function storageAt(L) { return L >= 20 ? 96 : L <= 15 ? Math.max(4, 40 + 4 * (L - 15)) : 40 + 8 * (L - 15); }
 
   function defaults() {
     return {
@@ -76,7 +76,9 @@
   function constIB(cfg) { return 1 + (cfg.prime ? 0.5 : 0) + Math.min(cfg.server + cfg.other, 10); }
   function lShardValue(cfg, st) { return Math.log(cfg.prime ? 0.12 : 0.10) + lTenth(st.res); }
   function lIB(cfg, st) { return lAdd(Math.log(constIB(cfg)), lShardValue(cfg, st) + st.S); }
-  function bankBonusOf(cfg, st) { return cfg.bankBonus + 0.05 * (st.bankLv - cfg.bankLv); }
+  // +5% per level, but Lv20 jumps from x1.90 to x2.00
+  function bonusAt(L) { return L >= 20 ? 2 : 1 + 0.05 * (L - 1); }
+  function bankBonusOf(cfg, st) { return bonusAt(st.bankLv); }
   // claiming less often than the storage fills loses the excess hours
   function storageOf(cfg, st) { return storageAt(st.bankLv); }
   // the player acts only inside a daily window of local hours; clock0 is the local hour at t = 0
@@ -360,12 +362,32 @@
     const lk = Math.log(cfg.rate * bankBonusOf(cfg, st)) + lTenth(st.intr) + lib;
     return Math.max(0, (lReserve(cfg) - lb0) / Math.exp(Math.min(lk, 700)));
   }
+  // each Yield level adds a tenth of the Ascend's base shards and costs 5 x its level: right before the Ascend,
+  // buy the levels that this Ascend alone pays back (shards up front, one click each)
+  function yieldTopUp(cfg, st, lP, log) {
+    if (!cfg.allowShop || !(cfg.maxClicks >= 1)) return;
+    const lB = Math.log(10) + 2 * (lP - Math.log(1000));
+    const lTop = lSub(Math.log(0.02) + lB, lAdd(st.yld, 0));
+    if (lTop === NEG) return;
+    const lN = Math.min(Math.log(Math.floor(cfg.maxClicks)), lTop, lLevelsWithin(st, 'yld', spendable(st)));
+    const n = lN < Math.log(1e15) ? Math.floor(Math.exp(lN) + 1e-9) : Math.exp(lN);
+    if (!(n >= 1)) return;
+    const lfrom = st.yld;
+    const lc = applyBuy(cfg, st, { key: 'yld', n: Math.log(n) });
+    st.S = lSub(st.S, st.yDebt); st.yDebt = NEG;
+    if (log) {
+      const rec = { t: st.t, key: 'yld', lfrom: lfrom, lto: st.yld, lcost: lc, asc: log.ascends.length };
+      log.buys.push(rec);
+      if (log.ascends.length) log.ascends[log.ascends.length - 1].buys.push(rec);
+    }
+  }
   function doAscend(cfg, st, log) {
     const d = dOf(st);
     const lW = lAdd(st.Wp, st.L);
     const lP = Math.max(st.target === HOLD ? NEG : st.target, lPAff(lSub(lW, Math.log(cfg.minBal)), d));
     if (st.yDebt !== NEG) { st.S = lSub(st.S, st.yDebt); st.yDebt = NEG; }
     payPrestigeDebt(st);
+    yieldTopUp(cfg, st, lP, log);
     const gain = lShardsAt(cfg, st, lP);
     st.S = lAdd(st.S, gain);
     if (log) log.ascends.push({ t: st.t, lP: lP, lgain: gain, lS: st.S, lib: lIB(cfg, st), lrate: lRate(cfg, st), buys: [] });
@@ -726,7 +748,7 @@
   }
 
   const api = {
-    F, HOLD, NEG, LN10, defaults, storageAt, storageOf, claimFactor, activeHours, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
+    F, HOLD, NEG, LN10, defaults, bonusAt, storageAt, storageOf, claimFactor, activeHours, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
     costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
