@@ -51,17 +51,17 @@
 
   function defaults() {
     return {
-      shards: 70, prime: true, server: 1.0, other: 0,
-      res: 1, yld: 0, intr: 1, rew: 0, disc: 0,
-      P: 1000, R: 1, bal: 6616699127772,
-      bankLv: 15, bankBonus: 1.70, rate: 0.1125, rawCap: 1e11, activeFrom: 9, activeTo: 22, clock0: 0,
+      shards: 0, prime: false, server: 0, other: 0,
+      res: 0, yld: 0, intr: 0, rew: 0, disc: 0,
+      P: 0, R: 1, bal: 0, networth: 0,
+      bankLv: 1, bankBonus: 1, rate: 0.0025, rawCap: 1e11, activeFrom: 0, activeTo: 0, clock0: 0,
       bankCosts: bankCostTable(),
       rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7, pweekly: 1e6, pmonthly: 1e7 },
       cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720, pweekly: 168, pmonthly: 720 },
-      nextIn: { daily: 24, prime: 24, weekly: 168, monthly: 720, pweekly: 168, pmonthly: 720 },
-      loan: true, floorShards: true, allowShop: true, allowBank: true,
+      nextIn: { daily: 0, prime: 0, weekly: 0, monthly: 0, pweekly: 0, pmonthly: 0 },
+      loan: false, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 0, minGap: 1, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
-      limitBits: Infinity, maxClicks: 100,
+      limitBits: 64, maxClicks: 100,
       objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000, targetRate: 1e14, records: 0
     };
   }
@@ -135,13 +135,24 @@
     while (R > 1 && d * RANK_K * sumSq(R - 1) > W) R--;
     return Math.log(Math.max(1, Math.min(100, R)));
   }
-  // points held in prestige or free to buy it (the bank keeps only the reserve)
-  function lHeld(cfg, st) { return lAdd(st.Wp, lSub(st.L, lReserve(cfg, st))); }
-  // points per day with the prestige that lW buys: bank interest plus rewards on that Income
-  function lDayAt(cfg, st, lW) {
-    return Math.log(24) + lAdd(lRate(cfg, st), lRho(cfg, st) + lPm(lW, dOf(st)) + lIB(cfg, st));
+  // bank interest per hour for the balance held: below the reserve it is that share of the cap (a loan being paid
+  // back counts as the full reserve)
+  function lBankNow(cfg, st) {
+    if (st.loanRepay) return lRate(cfg, st);
+    const lRes = lReserve(cfg, st);
+    return st.L >= lRes ? lRate(cfg, st) : st.L === NEG ? NEG : lRate(cfg, st) + st.L - lRes;
   }
-  const lDay = (cfg, st) => lDayAt(cfg, st, lHeld(cfg, st));
+  // the reserve is worth keeping only when the bank grows it quickly (below the cap it at least doubles in a day);
+  // otherwise, like on a fresh account, every point is worth more as prestige
+  function lKeep(cfg, st) { const lRes = lReserve(cfg, st); return lRate(cfg, st) - lRes >= -Math.log(24) ? lRes : NEG; }
+  // points held in prestige or free to buy it
+  function lHeld(cfg, st) { return lAdd(st.Wp, lSub(st.L, lKeep(cfg, st))); }
+  // points per day with the prestige that lW buys: bank interest (at the cap unless lBank says otherwise) plus
+  // rewards on that Income
+  function lDayAt(cfg, st, lW, lBank) {
+    return Math.log(24) + lAdd(lBank === undefined ? lRate(cfg, st) : lBank, lRho(cfg, st) + lPm(lW, dOf(st)) + lIB(cfg, st));
+  }
+  const lDay = (cfg, st) => lDayAt(cfg, st, lHeld(cfg, st), lBankNow(cfg, st));
   // points held after rem hours of putting everything into prestige: each day the rewards pay their daily share on
   // the Income held so far, plus the bank's flat interest. Right after an Ascend the Income starts at 1 and the first
   // days are slow; once a day adds less than half of W, √W grows linearly and the rest is closed-form
@@ -362,7 +373,7 @@
   }
   function rebalance(cfg, st) {
     if (st.bankNeed !== NEG) return;
-    const lRes = lReserve(cfg, st);
+    const lRes = lKeep(cfg, st);
     const lCt = st.target === HOLD ? Infinity : lCostToP(st.target, dOf(st));
     if (st.L > lRes && st.Wp < lCt) {
       const avail = lSub(st.L, lRes);
@@ -373,8 +384,18 @@
   }
   function advance(cfg, st, dt) {
     if (dt <= 0) return;
-    st.L = lAdd(st.L, lRate(cfg, st) + Math.log(dt));
-    st.lEarn = lAdd(st.lEarn, lRate(cfg, st) + Math.log(dt));
+    const lI = lRate(cfg, st), lRes = lReserve(cfg, st);
+    let lInc;
+    if (st.loanRepay || st.L >= lRes) lInc = lI + Math.log(dt);
+    else if (st.L === NEG) lInc = NEG;
+    else {
+      // below the reserve the balance grows by k of itself per hour (claimed often) until it reaches the reserve
+      const k = Math.exp(lI - lRes), tUp = (lRes - st.L) / k;
+      lInc = dt <= tUp ? st.L + Math.log(Math.expm1(k * dt)) : lAdd(lSub(lRes, st.L), lI + Math.log(dt - tUp));
+    }
+    st.L = lAdd(st.L, lInc);
+    st.lEarn = lAdd(st.lEarn, lInc);
+    if (st.loanRepay && st.L >= lRes) st.loanRepay = false;
     st.t += dt;
     rebalance(cfg, st);
   }
@@ -393,7 +414,7 @@
     // smallest first: each claim pays on all the prestige the points can buy (everything right before an Ascend,
     // otherwise what is above the interest reserve and a pending bank upgrade), earlier claims included
     for (const k of due) {
-      const lFree = atAscend ? st.L : lSub(st.L, lAdd(lReserve(cfg, st), st.bankNeed));
+      const lFree = atAscend ? st.L : lSub(st.L, lAdd(lKeep(cfg, st), st.bankNeed));
       const lpm = lPm(lAdd(st.Wp, lFree), dOf(st));
       const amt = Math.log(cfg.rewBase[k]) + lpm + lib + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
       st.L = lAdd(st.L, amt);
@@ -414,7 +435,7 @@
     return m;
   }
   function restartPenalty(cfg, st) {
-    if (cfg.loan) return 0;
+    if (cfg.loan || lKeep(cfg, st) === NEG) return 0;
     const lib = lIB(cfg, st);
     const lb0 = Math.log(cfg.rewBase.daily * (cfg.prime ? 2 : 1)) + lib + lTenth(st.rew);
     const lk = Math.log(cfg.rate * bankBonusOf(cfg, st)) + lTenth(st.intr) + lib;
@@ -454,7 +475,9 @@
     // with a loan the first reserve-worth of interest pays it back; without one the reserve is rebuilt during pen
     const pen = restartPenalty(cfg, st);
     if (pen > 0) st.t += pen;
-    if (!cfg.loan) st.L = lReserve(cfg, st);
+    const keep = lKeep(cfg, st) !== NEG;
+    st.loanRepay = cfg.loan && keep;
+    if (!cfg.loan && keep) st.L = lReserve(cfg, st);
     // purchases after this ascend happen once the bank is rebuilt
     if (log) { const a = log.ascends[log.ascends.length - 1]; a.tNext = st.t; a.restart = pen; }
     return lP;
@@ -636,7 +659,9 @@
 
   function limitCheck(cfg, st, log) {
     const lW = lAdd(st.Wp, st.L);
-    if (lW > cfg.limitBits * LN2) { st.limitAt = st.t; if (log) log.limitAt = st.t; return true; }
+    // a b-bit signed integer holds up to 2^(b-1); the networth (bank + everything spent) grows by every point earned
+    const lNet = lAdd(ln(cfg.networth || 0), st.lEarn);
+    if (Math.max(lW, lNet) > (cfg.limitBits - 1) * LN2) { st.limitAt = st.t; if (log) log.limitAt = st.t; return true; }
     if (lW > L_MAX || st.S > L_MAX) { if (log) log.overflowAt = st.t; return true; }
     return false;
   }
@@ -657,13 +682,15 @@
     const lMinBal = Math.log(cfg.minBal);
     let guard = 0;
     while (st.t < T - 1e-9 && guard++ < 400000) {
-      const lI = lRate(cfg, st);
+      const lI = lBankNow(cfg, st);
       const tr = nextActive(cfg, nextRewardTime(cfg, st));
       const td = nextActive(cfg, st.lastDecide + DECIDE_EVERY);
+      // hours until the interest covers a shortfall (none: now; no interest: only rewards can cover it)
+      const wait = lShort => lShort === NEG ? 0 : lI === NEG ? Infinity : Math.exp(lShort - lI);
       let te;
-      if (st.bankNeed !== NEG) te = nextActive(cfg, st.t + Math.exp(lSub(lAdd(st.bankNeed, lReserve(cfg, st)), st.L) - lI));
+      if (st.bankNeed !== NEG) te = nextActive(cfg, st.t + wait(lSub(lAdd(st.bankNeed, lKeep(cfg, st)), st.L)));
       else if (st.target === HOLD) te = Infinity;
-      else te = nextActive(cfg, Math.max(st.lastAsc + cfg.minGap, st.t + Math.exp(lSub(lAdd(lCostToP(st.target, dOf(st)), lMinBal), lAdd(st.Wp, st.L)) - lI)));
+      else te = nextActive(cfg, Math.max(st.lastAsc + cfg.minGap, st.t + wait(lSub(lAdd(lCostToP(st.target, dOf(st)), lMinBal), lAdd(st.Wp, st.L)))));
       const tn = Math.min(tr, te, td, T);
       advance(cfg, st, tn - st.t);
       if (limitCheck(cfg, st, log)) { st.stopped = true; break; }

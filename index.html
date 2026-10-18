@@ -166,9 +166,10 @@ tbody tr:hover td { background: var(--sunk); }
           <div class="fields">
             <div class="f"><label for="P">Prestige</label><input class="num" id="P" type="number" min="0" step="1"></div>
             <div class="f"><label for="R">Rank (1–100)</label><input class="num" id="R" type="number" min="1" max="100" step="1"></div>
-            <div class="f"><label for="bal">Bank balance</label><input class="num" id="bal" type="text" inputmode="decimal" placeholder="e.g. 6.6T"></div>
+            <div class="f"><label for="bal">Bank balance</label><input class="num" id="bal" type="text" inputmode="decimal" placeholder="e.g. 1.5T"></div>
             <div class="f"><label for="shards">Unspent shards</label><input class="num" id="shards" type="number" min="0" step="1"></div>
             <div class="f"><label for="records">Solo map records</label><input class="num" id="records" type="number" min="0" step="1"></div>
+            <div class="f"><label for="networth">Networth (from /stats)</label><input class="num" id="networth" type="text" inputmode="decimal" placeholder="e.g. 98T"></div>
           </div>
           <div class="checks">
             <label class="check"><input id="prime" type="checkbox"> Prime</label>
@@ -238,7 +239,7 @@ tbody tr:hover td { background: var(--sunk); }
         <summary>Import from bot messages</summary>
         <fieldset>
           <label class="lbl" for="paste">Paste the output of <code>/stats</code>, <code>/bank</code> and <code>/shards</code>, together or one at a time.</label>
-          <textarea id="paste" placeholder="DovahkiinNR — Stats&#10;Income Bonus&#10;11.74x on all income…"></textarea>
+          <textarea id="paste" placeholder="YourName — Stats&#10;Income Bonus&#10;6.12x on all income…"></textarea>
           <div class="row"><button id="parseBtn" type="button">Fill the fields</button><p id="parseMsg" class="msg"></p></div>
         </fieldset>
       </details>
@@ -351,7 +352,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5), as the shards guide says. Each click in the bot buys one level, so <b>Max upgrade clicks per Ascend</b> caps how many levels the plan buys after each Ascend and at each daily check. Levels add up rather than compound: an Interest Lv2 claim pays exactly ×1.20 (not ×1.21), and Resonance Lv1 gives 0.132x per shard with Prime, 0.11x without.</li>
                 <li><b>Growth since 18 Oct</b>: the bank no longer grows with your Income Bonus and shards above 10,000 count as a square root, so the old explosion is gone. What still scales is daily, weekly and monthly (Income × Income Bonus × Rewards): buying prestige with them raises the Income the next ones pay on. The Rewards upgrade (+10% per level on daily, weekly, monthly and primedaily) and Resonance are now the upgrades that matter most.</li>
                 <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
-                <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when the bank plus everything spent on prestige passes 2^bits: 64-bit is a signed database integer, about 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
+                <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when your networth (the one you enter plus everything you earn from now on) or the bank plus the prestige you hold would pass the largest signed integer of that size: 2^63 ≈ 9.2 Qi for 64-bit, the usual database integer. The bot has a limit like this: the 18 Oct nerf came from a weekly that was about to hit it. About 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
                 <li><b>Goals</b>: <b>points per day</b> is bank interest plus your daily, weekly and monthly rewards spread over their cooldowns, at the Income you hold on the date; <b>points earned</b> adds up everything you earn until the date, like the networth. <b>Reach a target</b>: the plan stops as soon as your Income Bonus or your points per day get to the target, and every choice is judged by how early that happens. When the target is further away than the decision window, a choice is judged by the Income Bonus it reaches by the end of the window.</li>
                 <li><b>Optimiser</b>: at every Ascend and once a day it tries shop purchases and target prestiges (including never Ascending), simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
               </ul>
@@ -395,7 +396,7 @@ tbody tr:hover td { background: var(--sunk); }
   const NEG = -Infinity, LN10 = Math.LN10;
   const NUM_IDS = ['P', 'R', 'shards', 'records', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly', 'nPWeekly', 'nPMonthly',
     'other', 'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
-  const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
+  const TXT_IDS = ['bal', 'networth', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const POINT_GOALS = { income: true, reachRate: true, networth: true };
   const KIND_CMD = { daily: '/daily', prime: '/primedaily', weekly: '/weekly', monthly: '/monthly', pweekly: '/primeweekly', pmonthly: '/primemonthly' };
@@ -421,12 +422,13 @@ tbody tr:hover td { background: var(--sunk); }
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T00:00`;
   }
   // example account, replaced by whatever the visitor enters (kept in this browser)
+  // a fresh account until the visitor enters theirs (kept in this browser)
   const DEFAULTS = {
-    P: 1000, R: 1, shards: 70, records: 0, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
-    nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, nPWeekly: 168, nPMonthly: 720, other: 0, minGap: 6, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
-    rP: 1000, rR: 100, rIB: 11.74,
-    bal: '6.6T', rawCap: '100B', targetRate: '100T', activeFrom: '09:00', activeTo: '22:00', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
-    prime: true, boost: true, loan: true, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
+    P: 0, R: 1, shards: 0, records: 0, res: 0, yld: 0, intr: 0, rew: 0, disc: 0, bankLv: 1, artifact: 0,
+    nDaily: 0, nPrime: 0, nWeekly: 0, nMonthly: 0, nPWeekly: 0, nPMonthly: 0, other: 0, minGap: 3, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
+    rP: 0, rR: 1, rIB: 1,
+    bal: '0', networth: '0', rawCap: '100B', targetRate: '1T', activeFrom: '00:00', activeTo: '00:00', targetDate: defaultDate(), objective: 'income', limitBits: '64', paste: '',
+    prime: false, boost: false, loan: false, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
     rUseAcc: true, rReinvest: false
   };
 
@@ -531,6 +533,9 @@ tbody tr:hover td { background: var(--sunk); }
     c.R = Math.min(100, Math.max(1, Math.round(num('R', 1))));
     const bal = parsePts($('bal').value);
     c.bal = isFinite(bal) ? bal : 0;
+    const nw = parsePts($('networth').value);
+    c.networth = isFinite(nw) ? nw : 0;
+    $('networth').classList.toggle('bad', !isFinite(nw));
     c.bankLv = Math.min(20, Math.max(1, Math.round(num('bankLv', 15))));
     c.bankBonus = M.bonusAt(c.bankLv);
     c.storage = M.storageAt(c.bankLv);
@@ -573,6 +578,7 @@ tbody tr:hover td { background: var(--sunk); }
     if (/Prime\s*\n\s*Active/i.test(text) || /\(Prime\)/i.test(text)) found.prime = true;
     if ((m = text.match(/Server Boost\s*`?\+([\d.]+)/i))) found.boost = parseFloat(m[1]) > 0;
     if ((m = text.match(/Networth\s*`?\+([\d.]+)/i))) found.other = parseFloat(m[1]);
+    if ((m = text.match(/Networth:\s*([\d.,]+)\s*points/i))) found.networth = m[1];
     if ((m = text.match(/×\s*([\d.]+)\s*\(/))) found.records = Math.max(0, Math.round((parseFloat(m[1]) - 1 - (/boost/i.test(text.slice(m.index, m.index + 40)) ? 0.25 : 0)) / 0.1));
     const p = after('prestige'); if (p && /^[\d.,]+$/.test(p)) found.P = parsePts(p);
     const r = after('rank'); if (r && /^[\d.,]+$/.test(r)) found.R = Math.min(100, parsePts(r));
@@ -675,7 +681,7 @@ tbody tr:hover td { background: var(--sunk); }
     const w = $('warnings'); w.textContent = '';
     if (L.limitAt !== undefined) {
       w.append(el('p', { class: 'note' }, el('strong', null, 'The projection stops on ' + fmtWhen(L.limitAt) + '. '),
-        `There the bank plus the points spent on prestige pass 2^${NF(0).format(cfg.limitBits)}, the number limit you picked. Set it to Unlimited to project further.`));
+        `There your networth (or the bank plus the prestige you hold) would pass 2^${NF(0).format(cfg.limitBits - 1)}, the largest number a ${NF(0).format(cfg.limitBits)}-bit signed integer holds. The 18 Oct nerf came from a weekly about to hit the bot's database limit, so don't go past it. Set the limit to Unlimited only to see what the formulas would give.`));
     } else if (L.overflowAt !== undefined) {
       w.append(el('p', { class: 'note' }, el('strong', null, 'The projection stops on ' + fmtWhen(L.overflowAt) + '. '),
         'Past 10^(10^300) the numbers are beyond what the calculator can represent.'));
@@ -761,7 +767,9 @@ tbody tr:hover td { background: var(--sunk); }
         parts.push('claim them one at a time and buy prestige with each before the next: ');
         now.forEach((r, j) => {
           const inc = Math.round(Math.exp(r.lpm));
-          if (j) parts.push(inc >= 200 ? [', then ', cmd('/prestigeupto ' + fmtInt(inc / 100 - 1)), ' and ', cmd('/rankupmax'), ` (Income ${fmtInt(inc)}x), `] : ', ');
+          const prev = j ? Math.round(Math.exp(now[j - 1].lpm)) : 1;
+          if (j) parts.push(inc >= 200 ? [', then ', cmd('/prestigeupto ' + fmtInt(inc / 100 - 1)), ' and ', cmd('/rankupmax'), ` (Income ${fmtInt(inc)}x), `]
+            : inc > prev ? [', then ', cmd('/rankupmax'), ` (Income ${fmtInt(inc)}x), `] : ', ');
           parts.push(cmd(KIND_CMD[r.kind]), ` (${fmtL(r.lamount)})`);
         });
         parts.push('. ');
@@ -1124,7 +1132,7 @@ tbody tr:hover td { background: var(--sunk); }
     const f = parseBot($('paste').value);
     const keys = Object.keys(f);
     for (const k of keys) setVal(k, f[k]);
-    const labels = { records: 'solo map records', shards: 'shards', prime: 'Prime', boost: 'server booster', other: 'networth bonus', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
+    const labels = { networth: 'networth', records: 'solo map records', shards: 'shards', prime: 'Prime', boost: 'server booster', other: 'networth bonus', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
       res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount' };
     const msg = $('parseMsg');
     msg.className = 'msg ' + (keys.length ? 'ok' : 'bad');
