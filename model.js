@@ -57,6 +57,8 @@
       bankLv: 1, bankBonus: 1, rate: 0.0025, rawCap: 1e11, activeFrom: 0, activeTo: 0, clock0: 0,
       bankCosts: bankCostTable(),
       rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7, pweekly: 1e6, pmonthly: 1e7 },
+      // since 18.10 #2 each reward is capped after all bonuses
+      rewCap: { daily: 2.4e12, prime: 2.4e12, weekly: 2.4e13, monthly: 2.4e14, pweekly: 2.4e13, pmonthly: 2.4e14 },
       cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720, pweekly: 168, pmonthly: 720 },
       nextIn: { daily: 0, prime: 0, weekly: 0, monthly: 0, pweekly: 0, pmonthly: 0 },
       loan: false, floorShards: true, allowShop: true, allowBank: true,
@@ -120,6 +122,19 @@
     }
     return lAdd(ln(boosted) + lTenth(st.rew), ln(plain));
   }
+  // one claim of kind k at Income lpm (ln), capped
+  function lRewAmt(cfg, st, k, lpm, lib) {
+    const l = Math.log(cfg.rewBase[k]) + lpm + (lib === undefined ? lIB(cfg, st) : lib) + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
+    return cfg.rewCap ? Math.min(l, Math.log(cfg.rewCap[k])) : l;
+  }
+  // reward points per hour at Income lpm, each kind spread over its cooldown and capped
+  function lRewH(cfg, st, lpm) {
+    if (!cfg.useRewards) return NEG;
+    const lib = lIB(cfg, st);
+    let l = NEG;
+    for (const k of KINDS) if (hasKind(cfg, k)) l = lAdd(l, lRewAmt(cfg, st, k, lpm, lib) - Math.log(cfg.cooldown[k]));
+    return l;
+  }
   function lCostToP(lP, d) { return lP === NEG ? NEG : Math.log(d * F / 2) + lP + lAdd(lP, 0); }
   function lPAff(lW, d) {
     if (lW === NEG) return NEG;
@@ -151,7 +166,7 @@
   // points per day with the prestige that lW buys: bank interest (at the cap unless lBank says otherwise) plus
   // rewards on that Income
   function lDayAt(cfg, st, lW, lBank) {
-    return Math.log(24) + lAdd(lBank === undefined ? lRate(cfg, st) : lBank, lRho(cfg, st) + lPm(lW, dOf(st)) + lIB(cfg, st));
+    return Math.log(24) + lAdd(lBank === undefined ? lRate(cfg, st) : lBank, lRewH(cfg, st, lPm(lW, dOf(st))));
   }
   const lDay = (cfg, st) => lDayAt(cfg, st, lHeld(cfg, st), lBankNow(cfg, st));
   // points held after rem hours of putting everything into prestige: each day the rewards pay their daily share on
@@ -164,13 +179,16 @@
     let h = rem;
     for (let i = 0; i < 60 && h > 0; i++) {
       const dt = Math.min(24, h);
-      const lGain = lAdd(lBankH, lRh + lPm(lW, d) + lib) + Math.log(dt);
+      const lGain = lAdd(lBankH, lRewH(cfg, st, lPm(lW, d))) + Math.log(dt);
       const steady = lW !== NEG && lGain < lW - LN2;
       lW = lAdd(lW, lGain);
       h -= dt;
       if (steady) break;
     }
     if (h > 0) {
+      // with every reward at its cap the points grow linearly; otherwise √W grows linearly
+      const lpm = lPm(lW, d);
+      if (lRewH(cfg, st, lpm) < lRh + lpm + lib - 1e-9) return lAdd(lW, lAdd(lBankH, lRewH(cfg, st, lpm)) + Math.log(h));
       const lk = lRh + lib + Math.log(100) + 0.5 * Math.log(2 / (d * F)) - LN2;
       lW = 2 * lAdd(0.5 * lAdd(lW, lBankH + Math.log(h)), lk + Math.log(h));
     }
@@ -274,7 +292,7 @@
         const w = DEFERRED[k] ? cfg.deferFrac * cfg.cooldown[k] : 0;
         let n = 0;
         for (let tc = Math.max(0, st.next[k] - st.t); tc < tMax && n < 24; tc += cfg.cooldown[k], n++)
-          c.push({ t: tc, te: nextActive(cfg, st.t + tc + w) - st.t, la: la });
+          c.push({ t: tc, te: nextActive(cfg, st.t + tc + w) - st.t, la: la, lcap: cfg.rewCap ? Math.log(cfg.rewCap[k]) : Infinity });
       }
       c.sort((x, y) => x.te - y.te);
     }
@@ -284,7 +302,7 @@
     for (let i = 0; i < c.length; i++) {
       if (c[i].te > tau) { lW = lAdd(lW, lI + Math.log(c[i].te - tau)); tau = c[i].te; }
       before[i] = lW;
-      lW = lAdd(lW, c[i].la + lPm(lW, d));
+      lW = lAdd(lW, Math.min(c[i].la + lPm(lW, d), c[i].lcap));
       after[i] = lW;
     }
     return { c: c, before: before, after: after, lI: lI };
@@ -306,7 +324,7 @@
     let lEnd = lNeed;
     const lpm = lPm(lNeed, d);
     const tLast = dt + cfg.deferFrac * cfg.cooldown.monthly + 24;
-    for (; i < n && c[i].te <= tLast; i++) if (c[i].t <= dt) lEnd = lAdd(lEnd, c[i].la + lpm);
+    for (; i < n && c[i].te <= tLast; i++) if (c[i].t <= dt) lEnd = lAdd(lEnd, Math.min(c[i].la + lpm, c[i].lcap));
     const lPend = lEnd > lNeed ? Math.max(lP, lPAff(lSub(lEnd, Math.log(cfg.minBal)), d)) : lP;
     const lGain = lShardsAt(cfg, st, lPend);
     const lIB1 = lIBat(cfg, st, lAdd(st.S, lGain));
@@ -417,7 +435,7 @@
     for (const k of due) {
       const lFree = atAscend ? st.L : lSub(st.L, lAdd(lKeep(cfg, st), st.bankNeed));
       const lpm = lPm(lAdd(st.Wp, lFree), dOf(st));
-      const amt = Math.log(cfg.rewBase[k]) + lpm + lib + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
+      const amt = lRewAmt(cfg, st, k, lpm, lib);
       st.L = lAdd(st.L, amt);
       st.lEarn = lAdd(st.lEarn, amt);
       st.next[k] = st.t + cfg.cooldown[k];
