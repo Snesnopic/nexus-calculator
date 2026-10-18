@@ -8,12 +8,15 @@
   const HOLD = Infinity;
   const NEG = -Infinity;
   // primeweekly / primemonthly pay like weekly / monthly; the Rewards upgrade only lists the first four
-  const KINDS = ['daily', 'prime', 'weekly', 'monthly', 'pweekly', 'pmonthly'];
+  // 'run' is a Zombies game the player plays regularly: it pays like a reward (base × Income × IB, uncapped), with its
+  // base and cadence worked out by the page from the map profile
+  const KINDS = ['daily', 'prime', 'weekly', 'monthly', 'pweekly', 'pmonthly', 'run'];
   const PRIME_ONLY = { prime: true, pweekly: true, pmonthly: true };
   // the Rewards upgrade boosts every reward: confirmed for primeweekly (18.10), assumed for primemonthly
   const REW_BOOSTED = { daily: true, prime: true, weekly: true, monthly: true, pweekly: true, pmonthly: true };
   const DEFERRED = { weekly: true, monthly: true, pweekly: true, pmonthly: true };
-  const hasKind = (cfg, k) => !PRIME_ONLY[k] || cfg.prime;
+  const hasKind = (cfg, k) => k === 'run' ? !!cfg.playRuns && cfg.rewBase.run > 0 && cfg.cooldown.run > 0 : cfg.useRewards && (!PRIME_ONLY[k] || cfg.prime);
+  const anyKind = cfg => KINDS.some(k => hasKind(cfg, k));
   // goals measured in points (per day or in total), where the Income held matters more than the shards
   const INCOME_GOALS = { income: true, reachRate: true, networth: true };
   // between Ascends the plan reconsiders purchases and the target once a day
@@ -57,11 +60,11 @@
       P: 0, R: 1, bal: 0, networth: 0,
       bankLv: 1, bankBonus: 1, rate: 0.0025, rawCap: 1e11, activeFrom: 0, activeTo: 0, clock0: 0,
       bankCosts: bankCostTable(),
-      rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7, pweekly: 1e6, pmonthly: 1e7 },
+      rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7, pweekly: 1e6, pmonthly: 1e7, run: 0 },
       // since 18.10 #2 each reward is capped after all bonuses
       rewCap: { daily: 2.4e12, prime: 2.4e12, weekly: 2.4e13, monthly: 2.4e14, pweekly: 2.4e13, pmonthly: 2.4e14 },
-      cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720, pweekly: 168, pmonthly: 720 },
-      nextIn: { daily: 0, prime: 0, weekly: 0, monthly: 0, pweekly: 0, pmonthly: 0 },
+      cooldown: { daily: 24, prime: 24, weekly: 168, monthly: 720, pweekly: 168, pmonthly: 720, run: 0 },
+      nextIn: { daily: 0, prime: 0, weekly: 0, monthly: 0, pweekly: 0, pmonthly: 0, run: 0 },
       loan: false, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 0, minGap: 1, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
       limitBits: 64, maxClicks: 100,
@@ -115,22 +118,22 @@
   function reserveOf(cfg, st) { return Math.exp(lReserve(cfg, st)); }
   // reward points per hour per unit of Income × Income Bonus (cooldowns spread over time)
   function lRho(cfg, st) {
-    if (!cfg.useRewards) return NEG;
+    if (!anyKind(cfg)) return NEG;
     let boosted = 0, plain = 0;
     for (const k of KINDS) {
       if (!hasKind(cfg, k)) continue;
       if (REW_BOOSTED[k]) boosted += cfg.rewBase[k] / cfg.cooldown[k]; else plain += cfg.rewBase[k] / cfg.cooldown[k];
     }
-    return lAdd(ln(boosted) + lTenth(st.rew), ln(plain));
+    return lAdd(boosted > 0 ? ln(boosted) + lTenth(st.rew) : NEG, ln(plain));
   }
   // one claim of kind k at Income lpm (ln), capped
   function lRewAmt(cfg, st, k, lpm, lib) {
     const l = Math.log(cfg.rewBase[k]) + lpm + (lib === undefined ? lIB(cfg, st) : lib) + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
-    return cfg.rewCap ? Math.min(l, Math.log(cfg.rewCap[k])) : l;
+    return cfg.rewCap && cfg.rewCap[k] > 0 ? Math.min(l, Math.log(cfg.rewCap[k])) : l;
   }
   // reward points per hour at Income lpm, each kind spread over its cooldown and capped
   function lRewH(cfg, st, lpm) {
-    if (!cfg.useRewards) return NEG;
+    if (!anyKind(cfg)) return NEG;
     const lib = lIB(cfg, st);
     let l = NEG;
     for (const k of KINDS) if (hasKind(cfg, k)) l = lAdd(l, lRewAmt(cfg, st, k, lpm, lib) - Math.log(cfg.cooldown[k]));
@@ -285,7 +288,7 @@
   // a claim pays on the prestige bought so far, so the path does not depend on the target
   function cyclePath(cfg, st, tMax) {
     const c = [];
-    if (cfg.useRewards) {
+    if (anyKind(cfg)) {
       const lib = lIB(cfg, st), lb = lTenth(st.rew);
       for (const k of KINDS) {
         if (!hasKind(cfg, k)) continue;
@@ -293,7 +296,7 @@
         const w = DEFERRED[k] ? cfg.deferFrac * cfg.cooldown[k] : 0;
         let n = 0;
         for (let tc = Math.max(0, st.next[k] - st.t); tc < tMax && n < 24; tc += cfg.cooldown[k], n++)
-          c.push({ t: tc, te: nextActive(cfg, st.t + tc + w) - st.t, la: la, lcap: cfg.rewCap ? Math.log(cfg.rewCap[k]) : Infinity });
+          c.push({ t: tc, te: nextActive(cfg, st.t + tc + w) - st.t, la: la, lcap: cfg.rewCap && cfg.rewCap[k] > 0 ? Math.log(cfg.rewCap[k]) : Infinity });
       }
       c.sort((x, y) => x.te - y.te);
     }
@@ -424,7 +427,7 @@
   }
   // weekly and monthly rewards wait (up to deferFrac of their cooldown) for the next ascend, where prestige peaks
   function claimRewards(cfg, st, log, atAscend) {
-    if (!cfg.useRewards) return;
+    if (!anyKind(cfg)) return;
     const dueNow = k => (atAscend ? st.next[k] : st.next[k] + deferOf(cfg, st, k)) <= st.t + 1e-9;
     // the order is by what each pays per unit of Income: Rewards boosts daily, weekly, monthly and primedaily only
     const per = k => Math.log(cfg.rewBase[k]) + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
@@ -445,7 +448,7 @@
     rebalance(cfg, st);
   }
   function nextRewardTime(cfg, st) {
-    if (!cfg.useRewards) return Infinity;
+    if (!anyKind(cfg)) return Infinity;
     let m = Infinity;
     for (const k of KINDS) {
       if (!hasKind(cfg, k)) continue;
@@ -560,7 +563,7 @@
   // each level is one click, so at most maxClicks of them
   function finalShop(cfg, st) {
     if (!cfg.allowShop || !(cfg.maxClicks >= 1) || cfg.objective === 'networth') return null;
-    const rate = INCOME_GOALS[cfg.objective] && cfg.useRewards;
+    const rate = INCOME_GOALS[cfg.objective] && anyKind(cfg);
     const C = Math.floor(cfg.maxClicks), sp = spendable(st);
     const lCost = (lL, n, base) => n > 0 ? Math.log(base) + lAdd(Math.log(n) + lL, Math.log(n) + lAdd(Math.log(n), 0) - LN2) : NEG;
     const view = (nr, ni) => {
