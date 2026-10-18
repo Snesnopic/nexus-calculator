@@ -62,7 +62,7 @@
       loan: false, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 0, minGap: 1, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
       limitBits: 64, maxClicks: 100,
-      objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000, targetRate: 1e14, records: 0
+      objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000, targetRate: 1e14, mult: 1, privateServer: false
     };
   }
 
@@ -76,16 +76,17 @@
   }
 
   // ---- base formulas (log domain) ----
-  function constIB(cfg) { return 1 + (cfg.prime ? 0.5 : 0) + Math.min(cfg.server + cfg.other, 10); }
-  // since 18.10: above 10,000 unspent shards only 10·√(S − 10,000) more count, and the whole shard bonus is multiplied
-  // by 1 + 0.1 per solo map record + 0.25 when boosting the server
+  // since the 18.10 rework the Income Bonus is 1 plus the shard bonus only; above 10,000 unspent shards only
+  // 10·√(S − 10,000) more count, and the shard bonus is multiplied by the shard multiplier /stats shows (boost +25%,
+  // leaderboard spots +10/5/2%, solo records +10%, Gun Game top 5 +30..2.5%); Prime makes each shard count 1.2x
+  function constIB(cfg) { return 1; }
   const L_SOFT = Math.log(1e4);
   function lEff(lS) {
     if (lS <= L_SOFT) return lS;
     const l = lAdd(L_SOFT, Math.log(10) + 0.5 * lSub(lS, L_SOFT));
     return l < Math.log(1e15) ? Math.log(Math.floor(Math.exp(l) + 1e-9)) : l;
   }
-  function shardMult(cfg) { return 1 + 0.1 * (cfg.records || 0) + (cfg.server > 0 ? 0.25 : 0); }
+  function shardMult(cfg) { return cfg.mult > 0 ? cfg.mult : 1; }
   function lShardValue(cfg, st) { return Math.log((cfg.prime ? 0.12 : 0.10) * shardMult(cfg)) + lTenth(st.res); }
   function lIBat(cfg, st, lS) { return lAdd(Math.log(constIB(cfg)), lShardValue(cfg, st) + lEff(lS)); }
   function lIB(cfg, st) { return lIBat(cfg, st, st.S); }
@@ -529,7 +530,7 @@
     let lpm = lPm(lWp, d), tot = NEG;
     const lpm0 = lpm;
     for (let R = 10; R <= cfg.round; R += 5) {
-      const r = Math.log(1500) + lpm + lib + (R / 5 - 1) * Math.log(1.4);
+      const r = Math.log(1500) + lpm + lib + (R / 5 - 1) * Math.log(1.4) + (cfg.privateServer ? LN2 : 0);
       tot = lAdd(tot, r);
       if (cfg.reinvest) { lWp = lAdd(lWp, r); lpm = lPm(lWp, d); }
     }

@@ -168,12 +168,12 @@ tbody tr:hover td { background: var(--sunk); }
             <div class="f"><label for="R">Rank (1–100)</label><input class="num" id="R" type="number" min="1" max="100" step="1"></div>
             <div class="f"><label for="bal">Bank balance</label><input class="num" id="bal" type="text" inputmode="decimal" placeholder="e.g. 1.5T"></div>
             <div class="f"><label for="shards">Unspent shards</label><input class="num" id="shards" type="number" min="0" step="1"></div>
-            <div class="f"><label for="records">Solo map records</label><input class="num" id="records" type="number" min="0" step="1"></div>
+            <div class="f"><label for="mult">Shard multiplier (×)</label><input class="num" id="mult" type="number" min="1" step="0.01"></div>
             <div class="f"><label for="networth">Networth (from /stats)</label><input class="num" id="networth" type="text" inputmode="decimal" placeholder="e.g. 98T"></div>
           </div>
           <div class="checks">
             <label class="check"><input id="prime" type="checkbox"> Prime</label>
-            <label class="check"><input id="boost" type="checkbox"> Server booster (+1x)</label>
+            <label class="check"><input id="priv" type="checkbox"> Private server (2x runs)</label>
           </div>
           <div class="readout" aria-live="polite">
             <div><span>Income Bonus</span><b id="roIB">–</b></div>
@@ -248,7 +248,6 @@ tbody tr:hover td { background: var(--sunk); }
         <summary>Advanced</summary>
         <fieldset>
           <div class="fields">
-            <div class="f"><label for="other">Other IB bonuses (+x)</label><input class="num" id="other" type="number" min="0" step="0.1"></div>
             <div class="f"><label for="rawCap">Hourly raw cap</label><input class="num" id="rawCap" type="text" inputmode="decimal"></div>
             <div class="f"><label for="minGap">Min hours between Ascends</label><input class="num" id="minGap" type="number" min="0.25" step="0.5"></div>
             <div class="f"><label for="maxClicks">Max upgrade clicks per Ascend</label><input class="num" id="maxClicks" type="number" min="0" step="10"></div>
@@ -339,7 +338,7 @@ tbody tr:hover td { background: var(--sunk); }
             <details>
               <summary>Formulas and assumptions</summary>
               <ul>
-                <li><b>Income Bonus</b> = 1 + 0.5 (Prime) + server booster + other bonuses (these two together cap at 10) + effective shards × 0.12 (0.10 without Prime) × (1 + 0.1 × Resonance) × shard boost. Since 18 Oct, up to 10,000 unspent shards count fully and above that only 10 × √(shards − 10,000) more (20,000 work like 11,000); the shard boost is 1 + 0.1 per solo map record + 0.25 when boosting the server. Matches /stats and /shards.</li>
+                <li><b>Income Bonus</b> (since the second 18 Oct update) = 1 + effective shards × 0.10 × 1.2 with Prime × (1 + 0.1 × Resonance) × shard multiplier. Up to 10,000 unspent shards count fully and above that only 10 × √(shards − 10,000) more (20,000 work like 11,000). The shard multiplier is the ×N that /stats shows: boosting the server +25%, 1st, 2nd and 3rd place in Networth, Prestige or a casino category +10%, +5% and +2% each, every solo map record +10%, Gun Game top 5 +30%, +20%, +10%, +5% and +2.5%. The old flat bonuses (Prime, boost, leaderboards, records) are gone.</li>
                 <li><b>Bank</b>: since 18 Oct an hour of interest is min(balance × interest rate × Income Bonus × (1 + 0.1 × Interest), 100B), and only the bank bonus and the stored hours come on top: at most 100B × bank bonus per hour (200B at Lv20), whatever your Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance that reaches the cap is 100B ÷ (rate × Income Bonus × Interest), a few million points once your Income Bonus is high; the plan keeps that much, and it is what you need back in the bank after an Ascend. Without a loan the plan assumes you rebuild it from /daily and /primedaily by claiming often.</li>
                 <li><b>Online hours</b>: Ascends, shop purchases, prestige purchases and reward claims only happen between <b>From</b> and <b>Until</b>; a reward that becomes ready while you are away is claimed when you come back, and its cooldown restarts from then. Interest piles up while you are away for at most 40 h at bank Lv15, 8 h more per level up to 72 h at Lv19, and 96 h at Lv20 (4 h per level below Lv15); if you are away longer than that every day, the plan counts the lost hours. Stored hours survive an Ascend.</li>
                 <li><b>Min hours between Ascends</b>: how often you are willing to Ascend. Since 18 Oct the plan Ascends far less often anyway: an Ascend resets the Income your rewards pay on.</li>
@@ -351,7 +350,7 @@ tbody tr:hover td { background: var(--sunk); }
                 <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Besides right after each Ascend, the plan checks the shop once a day. Resonance raises your Income Bonus at once and is bought as soon as the plan picks it; Interest only helps the bank reach its cap, so it is rarely worth it now. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus. On the goal date nothing comes after, so the shards left go into Resonance (and Rewards when the goal is points per day), up to the click limit.</li>
                 <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5), as the shards guide says. Each click in the bot buys one level, so <b>Max upgrade clicks per Ascend</b> caps how many levels the plan buys after each Ascend and at each daily check. Levels add up rather than compound: an Interest Lv2 claim pays exactly ×1.20 (not ×1.21), and Resonance Lv1 gives 0.132x per shard with Prime, 0.11x without.</li>
                 <li><b>Growth since 18 Oct</b>: the bank no longer grows with your Income Bonus and shards above 10,000 count as a square root, so the old explosion is gone. What still scales is daily, weekly and monthly (Income × Income Bonus × Rewards): buying prestige with them raises the Income the next ones pay on. The Rewards upgrade (+10% per level on daily, weekly, monthly and primedaily) and Resonance are now the upgrades that matter most.</li>
-                <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
+                <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1), doubled on private servers. Not verified against the server.</li>
                 <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when your networth (the one you enter plus everything you earn from now on) or the bank plus the prestige you hold would pass the largest signed integer of that size: 2^63 ≈ 9.2 Qi for 64-bit, the usual database integer. The bot has a limit like this: the 18 Oct nerf came from a weekly that was about to hit it. About 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
                 <li><b>Goals</b>: <b>points per day</b> is bank interest plus your daily, weekly and monthly rewards spread over their cooldowns, at the Income you hold on the date; <b>points earned</b> adds up everything you earn until the date, like the networth. <b>Reach a target</b>: the plan stops as soon as your Income Bonus or your points per day get to the target, and every choice is judged by how early that happens. When the target is further away than the decision window, a choice is judged by the Income Bonus it reaches by the end of the window.</li>
                 <li><b>Optimiser</b>: at every Ascend and once a day it tries shop purchases and target prestiges (including never Ascending), simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
@@ -394,10 +393,10 @@ tbody tr:hover td { background: var(--sunk); }
   const $ = id => document.getElementById(id);
   const KEY = 'nexus-calculator-v2';
   const NEG = -Infinity, LN10 = Math.LN10;
-  const NUM_IDS = ['P', 'R', 'shards', 'records', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly', 'nPWeekly', 'nPMonthly',
-    'other', 'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
+  const NUM_IDS = ['P', 'R', 'shards', 'mult', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly', 'nPWeekly', 'nPMonthly',
+    'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'networth', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
-  const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
+  const CHK_IDS = ['prime', 'priv', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const POINT_GOALS = { income: true, reachRate: true, networth: true };
   const KIND_CMD = { daily: '/daily', prime: '/primedaily', weekly: '/weekly', monthly: '/monthly', pweekly: '/primeweekly', pmonthly: '/primemonthly' };
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
@@ -424,11 +423,11 @@ tbody tr:hover td { background: var(--sunk); }
   // example account, replaced by whatever the visitor enters (kept in this browser)
   // a fresh account until the visitor enters theirs (kept in this browser)
   const DEFAULTS = {
-    P: 0, R: 1, shards: 0, records: 0, res: 0, yld: 0, intr: 0, rew: 0, disc: 0, bankLv: 1, artifact: 0,
-    nDaily: 0, nPrime: 0, nWeekly: 0, nMonthly: 0, nPWeekly: 0, nPMonthly: 0, other: 0, minGap: 3, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
+    P: 0, R: 1, shards: 0, mult: 1, res: 0, yld: 0, intr: 0, rew: 0, disc: 0, bankLv: 1, artifact: 0,
+    nDaily: 0, nPrime: 0, nWeekly: 0, nMonthly: 0, nPWeekly: 0, nPMonthly: 0, minGap: 3, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
     rP: 0, rR: 1, rIB: 1,
     bal: '0', networth: '0', rawCap: '100B', targetRate: '1T', activeFrom: '00:00', activeTo: '00:00', targetDate: defaultDate(), objective: 'income', limitBits: '64', paste: '',
-    prime: false, boost: false, loan: false, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
+    prime: false, priv: false, loan: false, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
     rUseAcc: true, rReinvest: false
   };
 
@@ -523,10 +522,9 @@ tbody tr:hover td { background: var(--sunk); }
   function readCfg() {
     const c = M.defaults();
     c.shards = Math.max(0, Math.round(num('shards', 0)));
-    c.records = Math.max(0, Math.round(num('records', 0)));
+    c.mult = Math.max(1, num('mult', 1));
     c.prime = $('prime').checked;
-    c.server = $('boost').checked ? 1 : 0;
-    c.other = Math.max(0, num('other', 0));
+    c.privateServer = $('priv').checked;
     for (const k of ['res', 'yld', 'intr', 'rew', 'disc']) c[k] = Math.max(0, Math.round(num(k, 0)));
     c.disc = Math.min(5, c.disc);
     c.P = Math.max(0, Math.round(num('P', 0)));
@@ -576,10 +574,8 @@ tbody tr:hover td { background: var(--sunk); }
     let m;
     if ((m = text.match(/(\d[\d.,]*)\s+unspent/i)) || (m = text.match(/(\d[\d.,]*)\s+shards\s*\S\s*\+/i))) found.shards = parsePts(m[1]);
     if (/Prime\s*\n\s*Active/i.test(text) || /\(Prime\)/i.test(text)) found.prime = true;
-    if ((m = text.match(/Server Boost\s*`?\+([\d.]+)/i))) found.boost = parseFloat(m[1]) > 0;
-    if ((m = text.match(/Networth\s*`?\+([\d.]+)/i))) found.other = parseFloat(m[1]);
     if ((m = text.match(/Networth:\s*([\d.,]+)\s*points/i))) found.networth = m[1];
-    if ((m = text.match(/×\s*([\d.]+)\s*\(/))) found.records = Math.max(0, Math.round((parseFloat(m[1]) - 1 - (/boost/i.test(text.slice(m.index, m.index + 40)) ? 0.25 : 0)) / 0.1));
+    if ((m = text.match(/×\s*([\d.]+)/))) found.mult = parseFloat(m[1]);
     const p = after('prestige'); if (p && /^[\d.,]+$/.test(p)) found.P = parsePts(p);
     const r = after('rank'); if (r && /^[\d.,]+$/.test(r)) found.R = Math.min(100, parsePts(r));
     const b = after('bank balance') || after('bank') || after('new bank'); if (b && /points/i.test(b)) found.bal = b.replace(/\s*points?/i, '');
@@ -1039,7 +1035,7 @@ tbody tr:hover td { background: var(--sunk); }
     let lpm = lpm0, tot = NEG;
     const rows = [];
     for (let r = 10; r <= 255; r += 5) {
-      const lrew = Math.log(1500) + lpm + lib + (r / 5 - 1) * Math.log(1.4);
+      const lrew = Math.log(1500) + lpm + lib + (r / 5 - 1) * Math.log(1.4) + (cfg.privateServer ? Math.LN2 : 0);
       tot = M.lAdd(tot, lrew);
       rows.push({ r: r, lpm: lpm, lrew: lrew, ltot: tot });
       if (reinvest) { lW = M.lAdd(lW, lrew); lpm = Math.max(lpm, M.lPm(M.lSub(lW, lres), d)); }
@@ -1132,7 +1128,7 @@ tbody tr:hover td { background: var(--sunk); }
     const f = parseBot($('paste').value);
     const keys = Object.keys(f);
     for (const k of keys) setVal(k, f[k]);
-    const labels = { networth: 'networth', records: 'solo map records', shards: 'shards', prime: 'Prime', boost: 'server booster', other: 'networth bonus', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
+    const labels = { networth: 'networth', mult: 'shard multiplier', shards: 'shards', prime: 'Prime', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
       res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount' };
     const msg = $('parseMsg');
     msg.className = 'msg ' + (keys.length ? 'ok' : 'bad');
@@ -1152,7 +1148,7 @@ tbody tr:hover td { background: var(--sunk); }
       : obj === 'bo2' ? `, last round ${v('round')}, buy prestige during the run ${on('reinvest')}` : '';
     const out = [
       'Nexus calculator, ' + new Date(NOW).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' local time',
-      `Account: P${v('P')} R${v('R')}, bank ${v('bal')}, ${v('shards')} unspent shards, ${v('records') || 0} solo map records, Prime ${on('prime')}, server booster ${on('boost')}, other IB +${v('other') || 0}`,
+      `Account: P${v('P')} R${v('R')}, bank ${v('bal')}, networth ${v('networth') || 0}, ${v('shards')} unspent shards, shard multiplier ×${v('mult') || 1}, Prime ${on('prime')}, private server ${on('priv')}`,
       `Shard upgrades: Resonance ${v('res')}, Yield ${v('yld')}, Interest ${v('intr')}, Rewards ${v('rew')}, Discount ${v('disc')}`,
       `Bank: level ${v('bankLv')}, artifact +${v('artifact')}%/hr, raw cap ${v('rawCap')}/hr`,
       `Online: ${v('activeFrom')}–${v('activeTo')}`,
