@@ -168,6 +168,7 @@ tbody tr:hover td { background: var(--sunk); }
             <div class="f"><label for="R">Rank (1–100)</label><input class="num" id="R" type="number" min="1" max="100" step="1"></div>
             <div class="f"><label for="bal">Bank balance</label><input class="num" id="bal" type="text" inputmode="decimal" placeholder="e.g. 6.6T"></div>
             <div class="f"><label for="shards">Unspent shards</label><input class="num" id="shards" type="number" min="0" step="1"></div>
+            <div class="f"><label for="records">Solo map records</label><input class="num" id="records" type="number" min="0" step="1"></div>
           </div>
           <div class="checks">
             <label class="check"><input id="prime" type="checkbox"> Prime</label>
@@ -176,7 +177,7 @@ tbody tr:hover td { background: var(--sunk); }
           <div class="readout" aria-live="polite">
             <div><span>Income Bonus</span><b id="roIB">–</b></div>
             <div><span>Income</span><b id="roPM">–</b></div>
-            <div><span>Bank per hour</span><b id="roBank">–</b></div>
+            <div><span>Points per day</span><b id="roDay">–</b></div>
           </div>
           <p class="hint" id="roNote"></p>
         </fieldset>
@@ -276,8 +277,9 @@ tbody tr:hover td { background: var(--sunk); }
               <select id="objective">
                 <option value="ib">Highest Income Bonus by the date</option>
                 <option value="reach">Reach a target Income Bonus as soon as possible</option>
-                <option value="reachRate">Reach a target bank income per hour as soon as possible</option>
-                <option value="income">Highest bank income by the date</option>
+                <option value="income">Most points per day by the date</option>
+                <option value="reachRate">Reach a target points per day as soon as possible</option>
+                <option value="networth">Most points earned by the date</option>
                 <option value="bo2">Biggest Zombies run on the date</option>
               </select>
             </div>
@@ -294,7 +296,7 @@ tbody tr:hover td { background: var(--sunk); }
               </select>
             </div>
             <div class="f narrow reachonly"><label for="targetIB">Target IB</label><input class="num" id="targetIB" type="number" min="1" step="100"></div>
-            <div class="f narrow reachrateonly"><label for="targetRate">Target bank/hr</label><input class="num" id="targetRate" type="text" inputmode="decimal" placeholder="e.g. 100T"></div>
+            <div class="f narrow reachrateonly"><label for="targetRate">Target points/day</label><input class="num" id="targetRate" type="text" inputmode="decimal" placeholder="e.g. 1Qa"></div>
             <div class="f narrow bo2only"><label for="round">Last round</label><input class="num" id="round" type="number" min="10" max="255" step="5"></div>
             <label class="check bo2only"><input id="reinvest" type="checkbox"> Buy prestige during the run</label>
             <button id="calcBtn" type="button">Recalculate</button>
@@ -316,7 +318,7 @@ tbody tr:hover td { background: var(--sunk); }
               <h2 id="chartTitle">Income Bonus over time</h2>
               <div class="seg" role="group" aria-label="Chart shows">
                 <button type="button" id="metIB" aria-pressed="true">Income Bonus</button>
-                <button type="button" id="metRate" aria-pressed="false">Bank per hour</button>
+                <button type="button" id="metRate" aria-pressed="false">Points per day</button>
               </div>
               <div class="legend" id="legend"></div>
             </div>
@@ -336,22 +338,22 @@ tbody tr:hover td { background: var(--sunk); }
             <details>
               <summary>Formulas and assumptions</summary>
               <ul>
-                <li><b>Income Bonus</b> = 1 + 0.5 (Prime) + server booster + other bonuses (these two together cap at 10) + unspent shards × 0.12 (0.10 without Prime) × (1 + 0.1 × Resonance). Matches /stats.</li>
-                <li><b>Bank</b>: raw per hour = min(balance × interest rate, 100B). A claim pays raw × bank bonus × (1 + 0.1 × Interest) × Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance needed for the full raw is 100B ÷ interest rate (0.89T at 11.25%/hr); the plan always keeps that much, and it is also the loan you need after an Ascend to claim the stored hours at full rate. Without a loan the plan assumes you rebuild that balance from /daily and /primedaily by claiming often, and loses the hours it takes. Matches /bank.</li>
+                <li><b>Income Bonus</b> = 1 + 0.5 (Prime) + server booster + other bonuses (these two together cap at 10) + effective shards × 0.12 (0.10 without Prime) × (1 + 0.1 × Resonance) × shard boost. Since 18 Oct, up to 10,000 unspent shards count fully and above that only 10 × √(shards − 10,000) more (20,000 work like 11,000); the shard boost is 1 + 0.1 per solo map record + 0.25 when boosting the server. Matches /stats and /shards.</li>
+                <li><b>Bank</b>: since 18 Oct an hour of interest is min(balance × interest rate × Income Bonus × (1 + 0.1 × Interest), 100B), and only the bank bonus and the stored hours come on top: at most 100B × bank bonus per hour (200B at Lv20), whatever your Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance that reaches the cap is 100B ÷ (rate × Income Bonus × Interest), a few million points once your Income Bonus is high; the plan keeps that much, and it is what you need back in the bank after an Ascend. Without a loan the plan assumes you rebuild it from /daily and /primedaily by claiming often.</li>
                 <li><b>Online hours</b>: Ascends, shop purchases, prestige purchases and reward claims only happen between <b>From</b> and <b>Until</b>; a reward that becomes ready while you are away is claimed when you come back, and its cooldown restarts from then. Interest piles up while you are away for at most 40 h at bank Lv15, 8 h more per level up to 72 h at Lv19, and 96 h at Lv20 (4 h per level below Lv15); if you are away longer than that every day, the plan counts the lost hours. Stored hours survive an Ascend.</li>
-                <li><b>Min hours between Ascends</b>: without a bank minimum every point buys about the same shards, so Ascending more often than every few hours barely helps; it mostly adds clicks and makes the calculation slower.</li>
+                <li><b>Min hours between Ascends</b>: how often you are willing to Ascend. Since 18 Oct the plan Ascends far less often anyway: an Ascend resets the Income your rewards pay on.</li>
                 <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%), and +10% for Lv20 (+100%). Lv12–20 cost 1.5T, 5T, 15T, 50T, 150T, 350T, 750T, 1.5Qa, 3Qa. The plan ignores the artifacts the upgrades also need (10, 25 and 45 Legendary for Lv14–16, 15 and 30 Mythic for Lv17–18, 25 Eternal for Lv19, 10 Nexus for Lv20): check you have them, and lower <b>Artifact interest</b> if the upgrade takes the one you have equipped.</li>
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
                 <li><b>Rewards</b>: daily and primedaily 100,000, weekly and primeweekly 1,000,000, monthly and primemonthly 10,000,000, each × Income × Income Bonus; the Rewards upgrade adds 10% per level to daily, weekly, monthly and primedaily. The plan holds the weekly and monthly ones for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
-                <li><b>Ascend</b>: only needs P ≥ 1000 and burns the whole bank, so the plan spends it all on prestige right before. It gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards rounded down; rank doesn't count (confirmed: P1339 → 17, P2391 → 57, P2571 → 66). Since both the shards and the cost of prestige grow with P², every point buys about the same shards at any prestige: Ascending often wins, and <b>Min hours between Ascends</b> sets how often you are willing to act.</li>
-                <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Resonance and Interest raise income at once and are bought as soon as the plan picks them. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus. On the goal date nothing comes after, so the shards left go into Resonance (and Interest when the goal is bank income), up to the click limit.</li>
-                <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5), as the shards guide says. Each click in the bot buys one level, so <b>Max upgrade clicks per Ascend</b> caps how many levels the plan buys after each Ascend. Levels add up rather than compound: an Interest Lv2 claim pays exactly ×1.20 (not ×1.21), and Resonance Lv1 gives 0.132x per shard with Prime, 0.11x without.</li>
-                <li><b>Why far projections explode</b>: with linear costs, the levels you can afford grow with the square root of your shards, so each Ascend multiplies the next one. Separately, daily, weekly and monthly pay Income × IB: once prestige is in the hundreds of thousands they outgrow the bank, and spending them on prestige before an Ascend turns them into shards with the square of prestige. Either loop makes the number of digits, not the number itself, grow every day.</li>
+                <li><b>Ascend</b>: only needs P ≥ 1000 and burns the whole bank, so the plan spends it all on prestige right before. It gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards rounded down; rank doesn't count (confirmed: P1339 → 17, P2391 → 57, P2571 → 66). Right before each Ascend the plan buys the Yield levels that Ascend alone pays back. Since 18 Oct an Ascend is worth it only when its shards raise your Income Bonus more than losing your Income costs in rewards: with many shards already, only an Ascend that brings a lot more of them (a very high prestige) does.</li>
+                <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Besides right after each Ascend, the plan checks the shop once a day. Resonance raises your Income Bonus at once and is bought as soon as the plan picks it; Interest only helps the bank reach its cap, so it is rarely worth it now. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus. On the goal date nothing comes after, so the shards left go into Resonance (and Rewards when the goal is points per day), up to the click limit.</li>
+                <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5), as the shards guide says. Each click in the bot buys one level, so <b>Max upgrade clicks per Ascend</b> caps how many levels the plan buys after each Ascend and at each daily check. Levels add up rather than compound: an Interest Lv2 claim pays exactly ×1.20 (not ×1.21), and Resonance Lv1 gives 0.132x per shard with Prime, 0.11x without.</li>
+                <li><b>Growth since 18 Oct</b>: the bank no longer grows with your Income Bonus and shards above 10,000 count as a square root, so the old explosion is gone. What still scales is daily, weekly and monthly (Income × Income Bonus × Rewards): buying prestige with them raises the Income the next ones pay on. The Rewards upgrade (+10% per level on daily, weekly, monthly and primedaily) and Resonance are now the upgrades that matter most.</li>
                 <li><b>Zombies run</b>: each block from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1). Not verified against the server.</li>
                 <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when the bank plus everything spent on prestige passes 2^bits: 64-bit is a signed database integer, about 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
-                <li><b>Reach a target Income Bonus or bank income</b>: the plan stops as soon as your Income Bonus (after an Ascend) or your bank income per hour (after an Ascend or a purchase) gets to the target, and every choice is judged by how early that happens. When the target is further away than the decision window, a choice is judged by the Income Bonus it reaches by the end of the window.</li>
-                <li><b>Optimiser</b>: at every Ascend it tries shop purchases and target prestiges, simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
+                <li><b>Goals</b>: <b>points per day</b> is bank interest plus your daily, weekly and monthly rewards spread over their cooldowns, at the Income you hold on the date; <b>points earned</b> adds up everything you earn until the date, like the networth. <b>Reach a target</b>: the plan stops as soon as your Income Bonus or your points per day get to the target, and every choice is judged by how early that happens. When the target is further away than the decision window, a choice is judged by the Income Bonus it reaches by the end of the window.</li>
+                <li><b>Optimiser</b>: at every Ascend and once a day it tries shop purchases and target prestiges (including never Ascending), simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
               </ul>
             </details>
           </section>
@@ -391,18 +393,19 @@ tbody tr:hover td { background: var(--sunk); }
   const $ = id => document.getElementById(id);
   const KEY = 'nexus-calculator-v2';
   const NEG = -Infinity, LN10 = Math.LN10;
-  const NUM_IDS = ['P', 'R', 'shards', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly', 'nPWeekly', 'nPMonthly',
+  const NUM_IDS = ['P', 'R', 'shards', 'records', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly', 'nPWeekly', 'nPMonthly',
     'other', 'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
   const CHK_IDS = ['prime', 'boost', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
+  const POINT_GOALS = { income: true, reachRate: true, networth: true };
   const KIND_CMD = { daily: '/daily', prime: '/primedaily', weekly: '/weekly', monthly: '/monthly', pweekly: '/primeweekly', pmonthly: '/primemonthly' };
   const NAMES = { res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount', bank: 'Bank' };
   // artifacts the bot asks for each bank level
   const BANK_ARTIFACTS = { 14: '10 Legendary artifacts', 15: '25 Legendary artifacts', 16: '45 Legendary artifacts', 17: '15 Mythic artifacts', 18: '30 Mythic artifacts', 19: '25 Eternal artifacts', 20: '10 Nexus artifacts' };
   const SERIES = [
     { name: 'Recommended plan', short: 'Plan', color: 'var(--s1)' },
-    { name: 'P* without upgrades', short: 'P*', color: 'var(--s2)' },
-    { name: 'Always P2000', short: 'P2000', color: 'var(--s3)' },
+    { name: 'Never Ascend, no upgrades', short: 'Hold', color: 'var(--s2)' },
+    { name: 'P* without upgrades', short: 'P*', color: 'var(--s3)' },
     { name: 'Always P1000', short: 'P1000', color: 'var(--s4)' }
   ];
   const MAX_DAYS = 1095;
@@ -419,7 +422,7 @@ tbody tr:hover td { background: var(--sunk); }
   }
   // example account, replaced by whatever the visitor enters (kept in this browser)
   const DEFAULTS = {
-    P: 1000, R: 1, shards: 70, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
+    P: 1000, R: 1, shards: 70, records: 0, res: 1, yld: 0, intr: 1, rew: 0, disc: 0, bankLv: 15, artifact: 10,
     nDaily: 24, nPrime: 24, nWeekly: 168, nMonthly: 720, nPWeekly: 168, nPMonthly: 720, other: 0, minGap: 6, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
     rP: 1000, rR: 100, rIB: 11.74,
     bal: '6.6T', rawCap: '100B', targetRate: '100T', activeFrom: '09:00', activeTo: '22:00', targetDate: defaultDate(), objective: 'ib', limitBits: 'none', paste: '',
@@ -518,6 +521,7 @@ tbody tr:hover td { background: var(--sunk); }
   function readCfg() {
     const c = M.defaults();
     c.shards = Math.max(0, Math.round(num('shards', 0)));
+    c.records = Math.max(0, Math.round(num('records', 0)));
     c.prime = $('prime').checked;
     c.server = $('boost').checked ? 1 : 0;
     c.other = Math.max(0, num('other', 0));
@@ -569,6 +573,7 @@ tbody tr:hover td { background: var(--sunk); }
     if (/Prime\s*\n\s*Active/i.test(text) || /\(Prime\)/i.test(text)) found.prime = true;
     if ((m = text.match(/Server Boost\s*`?\+([\d.]+)/i))) found.boost = parseFloat(m[1]) > 0;
     if ((m = text.match(/Networth\s*`?\+([\d.]+)/i))) found.other = parseFloat(m[1]);
+    if ((m = text.match(/×\s*([\d.]+)\s*\(/))) found.records = Math.max(0, Math.round((parseFloat(m[1]) - 1 - (/boost/i.test(text.slice(m.index, m.index + 40)) ? 0.25 : 0)) / 0.1));
     const p = after('prestige'); if (p && /^[\d.,]+$/.test(p)) found.P = parsePts(p);
     const r = after('rank'); if (r && /^[\d.,]+$/.test(r)) found.R = Math.min(100, parsePts(r));
     const b = after('bank balance') || after('bank') || after('new bank'); if (b && /points/i.test(b)) found.bal = b.replace(/\s*points?/i, '');
@@ -622,15 +627,17 @@ tbody tr:hover td { background: var(--sunk); }
     const lib = M.lIB(cfg, st);
     $('roIB').textContent = fmtIBL(lib);
     $('roPM').textContent = fmtInt((cfg.P + 1) * cfg.R) + 'x';
-    $('roBank').textContent = fmtL(M.lRate(cfg, st));
+    M.settleHeld(cfg, st);
+    $('roDay').textContent = fmtL(M.lDay(cfg, st));
     const note = $('roNote');
     note.textContent = '';
     if (botIB !== null) note.append(Math.abs(botIB - Math.exp(lib)) < 0.015 ? 'Same Income Bonus as the bot.' : `The bot says ${NF(2).format(botIB)}x: check the fields.`);
     else if (cfg.R < 100) note.append(`At rank 100 your Income would be ${fmtInt((cfg.P + 1) * 100)}x.`);
-    $('loanAmt').textContent = fmtL(Math.log(M.reserveOf(cfg)));
+    const lRes = M.lReserve(cfg, st);
+    $('loanAmt').textContent = fmtL(lRes);
     $('bankDerived').textContent = '';
     $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'),
-      ' · storage ', el('b', null, NF(0).format(cfg.storage) + ' h'), ' · keep at least ', el('b', null, fmtL(Math.log(M.reserveOf(cfg)))), ' in the bank for full interest');
+      ' · storage ', el('b', null, NF(0).format(cfg.storage) + ' h'), ' · capped at ', el('b', null, fmtL(M.lRate(cfg, st)) + '/hr'), ' from ', el('b', null, fmtL(lRes)), ' in the bank');
     const away = 24 - M.activeHours(cfg);
     if (away > cfg.storage) $('bankDerived').append(el('br'), el('b', null, `You are away ${NF(1).format(away)} h a day but the storage fills in ${NF(0).format(cfg.storage)} h: you lose ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest.`));
   }
@@ -649,19 +656,20 @@ tbody tr:hover td { background: var(--sunk); }
     const first = L.ascends[0];
     if (cfg.objective === 'reach' || cfg.objective === 'reachRate') {
       const ib = cfg.objective === 'reach';
-      const goal = ib ? fmtIBL(Math.log(cfg.targetIB)) : fmtL(Math.log(cfg.targetRate)) + '/hr';
+      const goal = ib ? fmtIBL(Math.log(cfg.targetIB)) : fmtL(Math.log(cfg.targetRate)) + '/day';
       kp.append(kpi('Reaches ' + goal, reached !== undefined ? (reached < 0.05 ? 'already there' : fmtWhen(reached)) : 'not by ' + fmtDay(H),
         reached !== undefined ? (reached < 0.05 ? 'you are already above it' : 'in ' + fmtDur(reached)) : 'pick a later date in Search until'));
       if (ib) kp.append(kpi('Income Bonus then', fmtIBL(final.lib), 'today ' + fmtIBL(res.now.lib)));
-      else kp.append(kpi('Bank per hour then', fmtL(final.lrate), 'today ' + fmtL(res.now.lrate) + ' · IB ' + fmtIBL(final.lib)));
+      else kp.append(kpi('Points per day then', fmtL(final.lday), 'today ' + fmtL(res.now.lday) + ' · IB ' + fmtIBL(final.lib)));
     } else if (cfg.objective === 'bo2') {
       kp.append(kpi('Run payout', fmtL(final.lreward), `up to round ${cfg.round}` + (capped ? ', at the limit' : '')));
       kp.append(kpi('Enter the run with', 'Income ' + fmtIntL(final.lpm) + 'x', 'Income Bonus ' + fmtIBL(final.lib)));
     } else {
       kp.append(kpi('Income Bonus on ' + fmtDay(end), fmtIBL(final.lib), 'today ' + fmtIBL(res.now.lib)));
-      kp.append(kpi('Bank per hour on ' + fmtDay(end), fmtL(final.lrate), 'today ' + fmtL(res.now.lrate)));
+      if (cfg.objective === 'networth') kp.append(kpi('Points earned by ' + fmtDay(end), fmtL(final.learn), 'points per day then ' + fmtL(final.lday)));
+      else kp.append(kpi('Points per day on ' + fmtDay(end), fmtL(final.lday), 'today ' + fmtL(res.now.lday)));
     }
-    kp.append(kpi('Next Ascend', first ? 'P' + fmtIntL(first.lP) : 'none', first ? fmtWhen(first.t) : 'not worth it before the date'));
+    kp.append(kpi('Next Ascend', first ? 'P' + fmtIntL(first.lP) : 'none', first ? fmtWhen(first.t) : 'keep the prestige: its Income pays the rewards'));
     kp.append(kpi('Ascends in the plan', fmtInt(L.ascends.length + (L.finalAscend ? 1 : 0)), (reached !== undefined ? 'to reach it, by ' : 'until ') + fmtDay(end)));
 
     const w = $('warnings'); w.textContent = '';
@@ -680,7 +688,7 @@ tbody tr:hover td { background: var(--sunk); }
       w.append(el('p', { class: 'note' }, el('strong', null, 'Projections stop after 3 years. '), 'Pick an earlier date for an exact horizon.'));
     }
     renderActions(res);
-    const series = [o, res.baselines[0].run, res.baselines.find(b => b.P === 2000).run, res.baselines.find(b => b.P === 1000).run]
+    const series = [o, res.baselines.find(b => b.name === 'hold').run, res.baselines.find(b => b.name === 'pstar').run, res.baselines.find(b => b.P === 1000).run]
       .map((r, i) => ({ s: SERIES[i], pts: r.pts }));
     renderChart(series, end, capped);
     renderPlan(res);
@@ -690,12 +698,14 @@ tbody tr:hover td { background: var(--sunk); }
   function renderActions(res) {
     const cfg = res.cfg, L = res.optimal.log;
     const ol = $('actions'); ol.textContent = '';
-    const buys0 = L.buys.filter(b => b.asc === 0);
-    const now0 = nowBuys(buys0), pre0 = prestigeBuys(buys0), yield0 = yieldBuys(buys0);
+    // decided now; Yield bought before the first Ascend (also the top-up right before it); daily checks until then
+    const buys0 = L.buys.filter(b => b.asc === 0 && b.t < 0.05);
+    const now0 = nowBuys(buys0), pre0 = prestigeBuys(buys0), yield0 = yieldBuys(L.buys.filter(b => b.asc === 0));
+    const later0 = L.buys.filter(b => b.asc === 0 && b.t >= 0.05 && b.key !== 'yld');
     let disc = cfg.disc;
     for (const b of pre0) if (b.key === 'disc') disc = Math.round(Math.exp(b.lto));
     const d = 1 - 0.05 * disc;
-    const reserve = M.reserveOf(cfg);
+    const reserve = M.reserveOf(cfg, M.initState(cfg, 0));
     const W0 = M.cumPR(cfg.P, cfg.R, d) + cfg.bal;
     const tgt = L.targets.length && isFinite(L.targets[0].target) ? Math.round(Math.exp(L.targets[0].target)) : Infinity;
     const Q = M.pAffD(W0 - reserve, d);
@@ -741,10 +751,27 @@ tbody tr:hover td { background: var(--sunk); }
       parts.push(soon ? 'Now: ' : `At your next /daily (${fmtWhen(dailyIn)}, in ${fmtDur(dailyIn)}): `);
       if (pre0.length) parts.push('buy ', buysText(pre0), ' in /shards, then ');
       if (canRaise) parts.push(cmd('/prestigeupto ' + Pnow), ' and ', cmd('/rankupmax'), ` (P${fmtInt(Pnow)} R100, Income ${fmtInt(100 * top)}x${soon ? '' : ', higher if you have earned more by then'}), then `);
+      // rewards claimed now, smallest first, each on the prestige the earlier ones bought
+      const now = L.rewards.filter(r => r.t < 0.05);
+      if (soon && now.length > 1) {
+        parts.push('claim them one at a time and buy prestige with each before the next: ');
+        now.forEach((r, j) => {
+          const inc = Math.round(Math.exp(r.lpm));
+          if (j) parts.push(inc >= 200 ? [', then ', cmd('/prestigeupto ' + fmtInt(inc / 100 - 1)), ' and ', cmd('/rankupmax'), ` (Income ${fmtInt(inc)}x), `] : ', ');
+          parts.push(cmd(KIND_CMD[r.kind]), ` (${fmtL(r.lamount)})`);
+        });
+        parts.push('. ');
+        ol.append(li(...parts.flat()));
+      }
+      if (!(soon && now.length > 1)) {
       parts.push('claim ', cmd('/daily'));
       if (cfg.prime) parts.push(' and ', cmd('/primedaily'));
-      parts.push(`, worth about ${fmtL(Math.log(1e5) + Math.log(100 * Math.max(1, top)) + M.lIB(cfg, stPaid) + Math.log(1 + 0.1 * Math.round(Math.exp(stPaid.rew === NEG ? NEG : stPaid.rew))))} each. Weekly and monthly rewards${cfg.prime ? ', Prime ones included,' : ''} wait for the Ascend, when prestige is highest.`);
+      const incNow = canRaise ? 100 * Math.max(1, top) : (cfg.P + 1) * cfg.R;
+      parts.push(`, worth about ${fmtL(Math.log(1e5) + Math.log(incNow) + M.lIB(cfg, stPaid) + Math.log(1 + 0.1 * Math.round(Math.exp(stPaid.rew === NEG ? NEG : stPaid.rew))))} each. `,
+        a && a.t < 24 * 7 * 0.25 ? `Weekly and monthly rewards${cfg.prime ? ', Prime ones included,' : ''} wait for the Ascend, when prestige is highest.`
+          : 'When several rewards are ready, claim the smallest first and buy prestige with it before the next: each one pays on the Income you hold when you claim it.');
       ol.append(li(...parts));
+      }
     }
     if (a) {
       const Pa = Math.round(Math.exp(a.lP));
@@ -761,8 +788,10 @@ tbody tr:hover td { background: var(--sunk); }
       }
       if (yield0.length) parts.push('buy ', buysText(yield0), ' only now, since it just boosts this Ascend, ');
       parts.push(cmd('/maxprestige'), ' (the whole bank is burned, so spend all of it), ', cmd('/ascend'));
-      if (cfg.loan) parts.push(`. Then borrow ${fmtL(lnOf(reserve))}, `, cmd('/claiminterest'), ' and pay it back.');
-      else parts.push(`. Then claim /daily and /claiminterest often until the bank is back above ${fmtL(lnOf(reserve))}.`);
+      // after the Ascend full interest needs rawCap / (rate × IB × Interest) in the bank
+      const lResA = Math.log(cfg.rawCap / cfg.rate) - a.lib - Math.log(1 + 0.1 * cfg.intr);
+      if (cfg.loan) parts.push(`. Then put ${fmtL(lResA)} back in the bank (a loan, or any reward you claim), `, cmd('/claiminterest'), ' and pay it back.');
+      else parts.push(`. Then claim /daily and /claiminterest often until the bank is back above ${fmtL(lResA)}.`);
       parts.push(` You get ${fmtIntL(a.lgain)} shards: Income Bonus ${fmtIBL(a.lib)}.`);
       ol.append(li(...parts));
       const after = nowBuys(a.buys), preNext = prestigeBuys(a.buys), nextY = yieldBuys(a.buys);
@@ -772,33 +801,42 @@ tbody tr:hover td { background: var(--sunk); }
       if (nextY.length) ol.append(li('Right before the following Ascend' + (when2 ? ` (${when2})` : '') + ', buy ', buysText(nextY), '.'));
     } else if (cfg.objective !== 'bo2') {
       const fa = L.finalAscend;
-      ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtIntL(fa.lP)} (+${fmtIntL(fa.lgain)} shards).` : 'You can’t reach P1000 before the date: keep buying prestige.'));
+      ol.append(li(fa ? `Don’t Ascend before the date: keep stacking and Ascend on ${fmtWhen(cfg.horizonH)} at P${fmtIntL(fa.lP)} (+${fmtIntL(fa.lgain)} shards).`
+        : POINT_GOALS[cfg.objective] ? 'Don’t Ascend before the date: keep buying prestige with everything (/prestigeupto, /rankupmax) right before each reward. The Income it gives is what pays now, and an Ascend would reset it.'
+        : 'You can’t reach P1000 before the date: keep buying prestige.'));
+    }
+    // purchases at the daily checks before the first Ascend
+    const groups = [];
+    for (const b of later0) { const g = groups.find(x => Math.abs(x.t - b.t) < 1e-6); if (g) g.list.push(b); else groups.push({ t: b.t, list: [b] }); }
+    if (groups.length) {
+      ol.append(li('Next days: ', ...groups.slice(0, 4).flatMap((g, j) => [j ? '; ' : '', `${fmtWhen(g.t)}, buy ${buysText(g.list)}`]),
+        groups.length > 4 ? `; then more, see the plan below.` : '.'));
     }
     if (cfg.objective === 'bo2' && L.final) {
       ol.append(li(`On ${fmtWhen(cfg.horizonH)}, start the run at R100 of your highest prestige: Income ${fmtIntL(L.final.lpm)}x, Income Bonus ${fmtIBL(L.final.lib)}. Up to round ${cfg.round} it pays about ${fmtL(L.final.lreward)}.`));
     }
   }
 
-  // the chart shows either the Income Bonus (lib) or the bank income per hour (lrate)
+  // the chart shows either the Income Bonus (lib) or the points per day (lday)
   let chartKey = 'lib', lastChart = null;
-  try { if (localStorage.getItem(KEY + '-chart') === 'lrate') chartKey = 'lrate'; } catch (e) { /* storage unavailable */ }
+  try { if (/^l(rate|day)$/.test(localStorage.getItem(KEY + '-chart') || '')) chartKey = 'lday'; } catch (e) { /* storage unavailable */ }
   function setChartKey(k) {
     chartKey = k;
     $('metIB').setAttribute('aria-pressed', String(k === 'lib'));
-    $('metRate').setAttribute('aria-pressed', String(k === 'lrate'));
-    $('chartTitle').textContent = k === 'lib' ? 'Income Bonus over time' : 'Bank income per hour over time';
+    $('metRate').setAttribute('aria-pressed', String(k === 'lday'));
+    $('chartTitle').textContent = k === 'lib' ? 'Income Bonus over time' : 'Points per day over time';
     try { localStorage.setItem(KEY + '-chart', k); } catch (e) { /* storage unavailable */ }
     if (lastChart) renderChart(...lastChart);
   }
   $('metIB').addEventListener('click', () => setChartKey('lib'));
-  $('metRate').addEventListener('click', () => setChartKey('lrate'));
+  $('metRate').addEventListener('click', () => setChartKey('lday'));
   setChartKey(chartKey);
 
   // y is log10 of the value; when that spans more than 300 decades the axis switches to log10 of the digit count
   function renderChart(series, xEnd, capped) {
     lastChart = [series, xEnd, capped];
     const K = chartKey;
-    const fmtY = K === 'lib' ? fmtIBL : l => fmtL(l) + '/hr';
+    const fmtY = K === 'lib' ? fmtIBL : l => fmtL(l) + '/day';
     const box = $('chartbox'); box.textContent = '';
     const lg = $('legend'); lg.textContent = '';
     for (const { s } of series) { const i = el('i'); i.style.background = s.color; lg.append(el('span', null, i, s.name)); }
@@ -814,7 +852,7 @@ tbody tr:hover td { background: var(--sunk); }
     const Y = lib => mt + ph * (1 - (yOf(lib) - ylo) / (yhi - ylo));
     const NS = 'http://www.w3.org/2000/svg';
     const mk = (tag, a) => { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); return e; };
-    const svg = mk('svg', { viewBox: `0 0 ${W} ${Hh}`, class: 'chart', role: 'img', 'aria-label': (K === 'lib' ? 'Income Bonus' : 'Bank income per hour') + ' over time for four strategies' });
+    const svg = mk('svg', { viewBox: `0 0 ${W} ${Hh}`, class: 'chart', role: 'img', 'aria-label': (K === 'lib' ? 'Income Bonus' : 'Points per day') + ' over time for four strategies' });
     const span = yhi - ylo, step = span <= 6 ? 1 : Math.ceil(span / 6);
     const ticks = [];
     for (let y = ylo; y <= yhi; y += step) {
@@ -889,34 +927,58 @@ tbody tr:hover td { background: var(--sunk); }
     const L = res.optimal.log, cfg = res.cfg;
     const tb = $('planTable'); tb.textContent = '';
     tb.append(el('thead', null, el('tr', null, el('th', null, '#'), el('th', null, 'When'), el('th', null, 'Ascend at'), el('th', { class: 'r' }, 'Shards'),
-      el('th', { class: 'r' }, 'IB after'), el('th', { class: 'r' }, 'Bank/hr after'), el('th', null, 'Notes'))));
+      el('th', { class: 'r' }, 'Income Bonus'), el('th', { class: 'r' }, 'Points/day'), el('th', null, 'Notes'))));
     const body = el('tbody');
-    const rows = L.ascends.map((a, i) => ({ a: a, i: i }));
+    // Ascends, plus the daily checks between them that buy something
+    const rows = L.ascends.map((a, i) => ({ t: a.t, a: a, i: i }));
     if (L.finalAscend) {
       const fa = Object.assign({ buys: [] }, L.finalAscend, { t: cfg.horizonH });
-      if (L.finalBuys && L.final) { fa.lib = L.final.lib; fa.lrate = L.final.lrate; }
-      rows.push({ a: fa, i: L.ascends.length, final: true });
+      if (L.finalBuys && L.final) { fa.lib = L.final.lib; fa.lday = L.final.lday; }
+      rows.push({ t: cfg.horizonH, a: fa, i: L.ascends.length, final: true });
     }
-    if (!rows.length && !L.finalBuys) body.append(el('tr', null, el('td', { colspan: 7 }, 'No Ascend before the date.')));
+    const attached = new Set(L.ascends.flatMap(a => a.buys));
+    const groups = [];
+    for (const b of L.buys) {
+      if (attached.has(b) || b.key === 'yld' || b.t < 0.05) continue;
+      const g = groups.find(x => Math.abs(x.t - b.t) < 1e-6);
+      if (g) g.list.push(b); else groups.push({ t: b.t, list: [b] });
+    }
+    for (const g of groups) {
+      const smp = L.samples.find(x => Math.abs(x.t - g.t) < 1e-6);
+      rows.push({ t: g.t, check: g.list, smp: smp });
+    }
+    // a daily check at the same time as an Ascend happens right before it
+    rows.sort((x, y) => x.t - y.t || (x.check ? 0 : 1) - (y.check ? 0 : 1));
+    if (!rows.length && !L.finalBuys) body.append(el('tr', null, el('td', { colspan: 7 }, POINT_GOALS[cfg.objective] ? 'No Ascend before the date: the plan keeps the prestige.' : 'No Ascend before the date.')));
     const HEAD = 40, TAIL = 8;
-    rows.forEach(({ a, i, final }, idx) => {
+    rows.forEach((row, idx) => {
       if (rows.length > HEAD + TAIL + 1 && idx >= HEAD && idx < rows.length - TAIL) {
-        if (idx === HEAD) body.append(el('tr', { class: 'over' }, el('td', { colspan: 7 }, `${NF(0).format(rows.length - HEAD - TAIL)} more Ascends, same pattern.`)));
+        if (idx === HEAD) body.append(el('tr', { class: 'over' }, el('td', { colspan: 7 }, `${NF(0).format(rows.length - HEAD - TAIL)} more rows, same pattern.`)));
         return;
       }
+      if (row.check) {
+        const pre = prestigeBuys(row.check), now = row.check.filter(b => !pre.includes(b));
+        const notes = el('td', null, 'Daily check: ', now.length ? 'buy ' + buysText(now) + '. ' : '', pre.length ? 'Next time you buy prestige, first buy ' + buysText(pre) + '. ' : '');
+        body.append(el('tr', null, el('td', { class: 'n' }, '·'), el('td', { class: 'n' }, fmtWhen(row.t)), el('td', null, 'no Ascend'), el('td', null, ''),
+          el('td', { class: 'n r' }, row.smp ? fmtIBL(row.smp.lib) : ''), el('td', { class: 'n r' }, row.smp ? fmtL(row.smp.lday) : ''), notes));
+        return;
+      }
+      const { a, i, final } = row;
       const notes = el('td');
       const rw = L.rewards.filter(r => Math.abs(r.t - a.t) < 1e-6 && /weekly|monthly/.test(r.kind)).map(r => ({ pweekly: 'primeweekly', pmonthly: 'primemonthly' })[r.kind] || r.kind);
       if (rw.length) notes.append('claim ' + rw.join(' + ') + ' first. ');
-      if (a.restart > 0) notes.append(`then about ${fmtDur(a.restart)} to rebuild ${fmtL(Math.log(M.reserveOf(cfg)))} without a loan. `);
-      const ybefore = yieldBuys(i === 0 ? L.buys.filter(b => b.asc === 0) : (L.ascends[i - 1] ? L.ascends[i - 1].buys : []));
+      if (a.restart > 0) notes.append(`then about ${fmtDur(a.restart)} to rebuild the bank's reserve without a loan. `);
+      const ybefore = yieldBuys(L.buys.filter(b => b.asc === i));
       if (ybefore.length) notes.prepend('right before: buy ' + buysText(ybefore) + '. ');
       const after = nowBuys(a.buys || []), preNext = prestigeBuys(a.buys || []);
       if (after.length) notes.append((a.restart > 0 ? 'After that, buy ' : 'then buy ') + buysText(after) + '. ');
       if (preNext.length) notes.append('Next time you buy prestige, first buy ' + buysText(preNext) + '. ');
       if (final) notes.append('on the goal date. ' + (L.finalBuys ? 'Then buy ' + buysText(L.finalBuys) + ': nothing comes after, so the shards are worth more as levels. ' : ''));
+      // points per day just before the Ascend: what it gives up until the prestige is rebuilt
+      const lday = final ? a.lday : a.ldayPre;
       body.append(el('tr', null,
         el('td', { class: 'n' }, NF(0).format(i + 1)), el('td', { class: 'n' }, fmtWhen(a.t)), el('td', { class: 'n' }, 'P' + fmtIntL(a.lP)),
-        el('td', { class: 'n r' }, '+' + fmtIntL(a.lgain)), el('td', { class: 'n r' }, fmtIBL(a.lib)), el('td', { class: 'n r' }, fmtL(a.lrate)), notes));
+        el('td', { class: 'n r' }, '+' + fmtIntL(a.lgain)), el('td', { class: 'n r' }, fmtIBL(a.lib)), el('td', { class: 'n r' }, lday !== undefined ? fmtL(lday) : ''), notes));
     });
     if (L.finalBuys && !L.finalAscend) {
       body.append(el('tr', null, el('td', { colspan: 7 }, `On the goal date (${fmtWhen(cfg.horizonH)}), buy ${buysText(L.finalBuys)}: nothing comes after, so the shards are worth more as levels.`)));
@@ -925,14 +987,15 @@ tbody tr:hover td { background: var(--sunk); }
   }
 
   function renderCompare(res) {
-    const bo2 = res.cfg.objective === 'bo2', reach = /^reach/.test(res.cfg.objective);
-    const goalTxt = res.cfg.objective === 'reach' ? fmtIBL(Math.log(res.cfg.targetIB)) : fmtL(Math.log(res.cfg.targetRate)) + '/hr';
+    const obj = res.cfg.objective, bo2 = obj === 'bo2', reach = /^reach/.test(obj);
+    const goalTxt = obj === 'reach' ? fmtIBL(Math.log(res.cfg.targetIB)) : fmtL(Math.log(res.cfg.targetRate)) + '/day';
+    const third = bo2 ? 'IB at the end' : obj === 'networth' ? 'Points earned' : 'Points/day at the end';
     const tb = $('cmpTable'); tb.textContent = '';
     tb.append(el('thead', null, el('tr', null, el('th', null, 'Strategy'), el('th', { class: 'r' }, bo2 ? 'Run payout' : reach ? 'Reaches ' + goalTxt : 'IB at the end'),
-      el('th', { class: 'r' }, bo2 ? 'IB at the end' : 'Bank/hr at the end'), el('th', { class: 'r' }, 'Ascends'), el('th', null, 'Ends'))));
+      el('th', { class: 'r' }, third), el('th', { class: 'r' }, 'Ascends'), el('th', null, 'Ends'))));
     const body = el('tbody');
-    const names = ['P* without upgrades', 'Always P1000', 'Always P1500', 'Always P2000', 'Always P3000'];
-    const rows = [{ name: 'Recommended plan', run: res.optimal, best: true }].concat(res.baselines.map((b, i) => ({ name: names[i], run: b.run })));
+    const NAME = { hold: 'Never Ascend, no upgrades', pstar: 'P* without upgrades' };
+    const rows = [{ name: 'Recommended plan', run: res.optimal, best: true }].concat(res.baselines.map(b => ({ name: NAME[b.name] || 'Always P' + b.P, run: b.run })));
     for (const r of rows) {
       const f = r.run.log.final || {};
       const ra = r.run.log.reachedAt;
@@ -940,7 +1003,7 @@ tbody tr:hover td { background: var(--sunk); }
       body.append(el('tr', null,
         el('td', null, r.name, r.best ? ' ' : null, r.best ? el('span', { class: 'chip best' }, 'recommended') : null),
         el('td', { class: 'n r' }, bo2 ? fmtL(f.lreward) : reach ? (ra !== undefined ? fmtDur(ra) + ', ' + fmtDay(ra) : 'not by the date') : fmtIBL(f.lib)),
-        el('td', { class: 'n r' }, bo2 ? fmtIBL(f.lib) : fmtL(f.lrate)),
+        el('td', { class: 'n r' }, bo2 ? fmtIBL(f.lib) : obj === 'networth' ? fmtL(f.learn) : fmtL(f.lday)),
         el('td', { class: 'n r' }, fmtInt(r.run.log.ascends.length + (r.run.log.finalAscend ? 1 : 0))),
         el('td', null, ends)));
     }
@@ -959,8 +1022,8 @@ tbody tr:hover td { background: var(--sunk); }
     const lpm0 = Math.log((P + 1) * R);
     const lrate = M.lRate(cfg, st);
     const reinvest = $('rReinvest').checked;
-    const d = M.dOf(st), lres = M.lReserve(cfg);
-    let lW = lnOf(M.cumPR(P, R, d) + (useAcc ? cfg.bal : M.reserveOf(cfg)));
+    const d = M.dOf(st), lres = M.lReserve(cfg, st);
+    let lW = lnOf(M.cumPR(P, R, d) + (useAcc ? cfg.bal : M.reserveOf(cfg, st)));
     let lpm = lpm0, tot = NEG;
     const rows = [];
     for (let r = 10; r <= 255; r += 5) {
@@ -1057,7 +1120,7 @@ tbody tr:hover td { background: var(--sunk); }
     const f = parseBot($('paste').value);
     const keys = Object.keys(f);
     for (const k of keys) setVal(k, f[k]);
-    const labels = { shards: 'shards', prime: 'Prime', boost: 'server booster', other: 'networth bonus', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
+    const labels = { records: 'solo map records', shards: 'shards', prime: 'Prime', boost: 'server booster', other: 'networth bonus', P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest',
       res: 'Resonance', yld: 'Yield', intr: 'Interest', rew: 'Rewards', disc: 'Discount' };
     const msg = $('parseMsg');
     msg.className = 'msg ' + (keys.length ? 'ok' : 'bad');
@@ -1077,7 +1140,7 @@ tbody tr:hover td { background: var(--sunk); }
       : obj === 'bo2' ? `, last round ${v('round')}, buy prestige during the run ${on('reinvest')}` : '';
     const out = [
       'Nexus calculator, ' + new Date(NOW).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' local time',
-      `Account: P${v('P')} R${v('R')}, bank ${v('bal')}, ${v('shards')} unspent shards, Prime ${on('prime')}, server booster ${on('boost')}, other IB +${v('other') || 0}`,
+      `Account: P${v('P')} R${v('R')}, bank ${v('bal')}, ${v('shards')} unspent shards, ${v('records') || 0} solo map records, Prime ${on('prime')}, server booster ${on('boost')}, other IB +${v('other') || 0}`,
       `Shard upgrades: Resonance ${v('res')}, Yield ${v('yld')}, Interest ${v('intr')}, Rewards ${v('rew')}, Discount ${v('disc')}`,
       `Bank: level ${v('bankLv')}, artifact +${v('artifact')}%/hr, raw cap ${v('rawCap')}/hr`,
       `Online: ${v('activeFrom')}–${v('activeTo')}`,
@@ -1085,7 +1148,7 @@ tbody tr:hover td { background: var(--sunk); }
       `Settings: min ${v('minGap')} h between Ascends, max ${v('maxClicks')} upgrade clicks per Ascend, decision window ${v('lookahead')} days, ` +
         `borrow ${on('loan')}, shard upgrades ${on('allowShop')}, bank levels ${on('allowBank')}, rewards ${on('useRewards')}`,
       `Goal: ${sel('objective')}${goal}, ${/^reach/.test(obj) ? 'search until' : 'date'} ${v('targetDate').replace('T', ' ')}, number limit ${sel('limitBits')}`,
-      `Now: Income Bonus ${$('roIB').textContent}, Income ${$('roPM').textContent}, bank per hour ${$('roBank').textContent}`
+      `Now: Income Bonus ${$('roIB').textContent}, Income ${$('roPM').textContent}, points per day ${$('roDay').textContent}`
     ];
     if ($('out').classList.contains('busy') || !$('kpis').children.length) {
       out.push('', 'No results yet: ' + (flat($('warnings')) || 'still calculating.'));

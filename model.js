@@ -13,6 +13,10 @@
   const REW_BOOSTED = { daily: true, prime: true, weekly: true, monthly: true };
   const DEFERRED = { weekly: true, monthly: true, pweekly: true, pmonthly: true };
   const hasKind = (cfg, k) => !PRIME_ONLY[k] || cfg.prime;
+  // goals measured in points (per day or in total), where the Income held matters more than the shards
+  const INCOME_GOALS = { income: true, reachRate: true, networth: true };
+  // between Ascends the plan reconsiders purchases and the target once a day
+  const DECIDE_EVERY = 24;
   const LN10 = Math.LN10, LN2 = Math.LN2;
   const L_SMALL = Math.log(1e30);
   const L_MAX = 1e300;
@@ -58,7 +62,7 @@
       loan: true, floorShards: true, allowShop: true, allowBank: true,
       minP: 1000, minBal: 0, minGap: 1, lookahead: 336, useRewards: true, deferFrac: 0.25, buyMargin: Math.log(1.01),
       limitBits: Infinity, maxClicks: 100,
-      objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000, targetRate: 1e14
+      objective: 'ib', horizonH: 1400, round: 150, reinvest: false, targetIB: 1000, targetRate: 1e14, records: 0
     };
   }
 
@@ -70,12 +74,21 @@
     const x = Math.floor((-1 + Math.sqrt(1 + 8 * W / (d * F))) / 2 + 1e-9);
     return costToPD(x, d) <= W * (1 + 1e-12) ? x : x - 1;
   }
-  function reserveOf(cfg) { return cfg.rawCap / cfg.rate; }
 
   // ---- base formulas (log domain) ----
   function constIB(cfg) { return 1 + (cfg.prime ? 0.5 : 0) + Math.min(cfg.server + cfg.other, 10); }
-  function lShardValue(cfg, st) { return Math.log(cfg.prime ? 0.12 : 0.10) + lTenth(st.res); }
-  function lIB(cfg, st) { return lAdd(Math.log(constIB(cfg)), lShardValue(cfg, st) + st.S); }
+  // since 18.10: above 10,000 unspent shards only 10·√(S − 10,000) more count, and the whole shard bonus is multiplied
+  // by 1 + 0.1 per solo map record + 0.25 when boosting the server
+  const L_SOFT = Math.log(1e4);
+  function lEff(lS) {
+    if (lS <= L_SOFT) return lS;
+    const l = lAdd(L_SOFT, Math.log(10) + 0.5 * lSub(lS, L_SOFT));
+    return l < Math.log(1e15) ? Math.log(Math.floor(Math.exp(l) + 1e-9)) : l;
+  }
+  function shardMult(cfg) { return 1 + 0.1 * (cfg.records || 0) + (cfg.server > 0 ? 0.25 : 0); }
+  function lShardValue(cfg, st) { return Math.log((cfg.prime ? 0.12 : 0.10) * shardMult(cfg)) + lTenth(st.res); }
+  function lIBat(cfg, st, lS) { return lAdd(Math.log(constIB(cfg)), lShardValue(cfg, st) + lEff(lS)); }
+  function lIB(cfg, st) { return lIBat(cfg, st, st.S); }
   // +5% per level, but Lv20 jumps from x1.90 to x2.00
   function bonusAt(L) { return L >= 20 ? 2 : 1 + 0.05 * (L - 1); }
   function bankBonusOf(cfg, st) { return bonusAt(st.bankLv); }
@@ -90,9 +103,22 @@
   }
   // interest piles up while you are away, but only for as many hours as the storage holds
   function claimFactor(cfg, st) { return Math.min(1, (activeHours(cfg) + storageOf(cfg, st)) / 24); }
-  function lRate(cfg, st) { return Math.log(cfg.rawCap * bankBonusOf(cfg, st) * claimFactor(cfg, st)) + lTenth(st.intr) + lIB(cfg, st); }
+  // since 18.10 the hourly cap applies after the Income Bonus and Interest, and only the facility bonus and the stored
+  // hours come on top: every balance at or above the reserve earns rawCap × bonus
+  function lRate(cfg, st) { return Math.log(cfg.rawCap * bankBonusOf(cfg, st) * claimFactor(cfg, st)); }
   function dOf(st) { return 1 - 0.05 * st.disc; }
-  function lReserve(cfg) { return Math.log(reserveOf(cfg)); }
+  function lReserve(cfg, st) { return Math.log(cfg.rawCap / cfg.rate) - lIB(cfg, st) - lTenth(st.intr); }
+  function reserveOf(cfg, st) { return Math.exp(lReserve(cfg, st)); }
+  // reward points per hour per unit of Income × Income Bonus (cooldowns spread over time)
+  function lRho(cfg, st) {
+    if (!cfg.useRewards) return NEG;
+    let boosted = 0, plain = 0;
+    for (const k of KINDS) {
+      if (!hasKind(cfg, k)) continue;
+      if (REW_BOOSTED[k]) boosted += cfg.rewBase[k] / cfg.cooldown[k]; else plain += cfg.rewBase[k] / cfg.cooldown[k];
+    }
+    return lAdd(ln(boosted) + lTenth(st.rew), ln(plain));
+  }
   function lCostToP(lP, d) { return lP === NEG ? NEG : Math.log(d * F / 2) + lP + lAdd(lP, 0); }
   function lPAff(lW, d) {
     if (lW === NEG) return NEG;
@@ -109,6 +135,37 @@
     while (R > 1 && d * RANK_K * sumSq(R - 1) > W) R--;
     return Math.log(Math.max(1, Math.min(100, R)));
   }
+  // points held in prestige or free to buy it (the bank keeps only the reserve)
+  function lHeld(cfg, st) { return lAdd(st.Wp, lSub(st.L, lReserve(cfg, st))); }
+  // points per day with the prestige that lW buys: bank interest plus rewards on that Income
+  function lDayAt(cfg, st, lW) {
+    return Math.log(24) + lAdd(lRate(cfg, st), lRho(cfg, st) + lPm(lW, dOf(st)) + lIB(cfg, st));
+  }
+  const lDay = (cfg, st) => lDayAt(cfg, st, lHeld(cfg, st));
+  // points held after rem hours of putting everything into prestige: each day the rewards pay their daily share on
+  // the Income held so far, plus the bank's flat interest. Right after an Ascend the Income starts at 1 and the first
+  // days are slow; once a day adds less than half of W, √W grows linearly and the rest is closed-form
+  function lWAfter(cfg, st, lW, rem) {
+    if (!(rem > 0)) return lW;
+    const d = dOf(st), lib = lIB(cfg, st), lRh = lRho(cfg, st);
+    const lBankH = lRate(cfg, st);
+    let h = rem;
+    for (let i = 0; i < 60 && h > 0; i++) {
+      const dt = Math.min(24, h);
+      const lGain = lAdd(lBankH, lRh + lPm(lW, d) + lib) + Math.log(dt);
+      const steady = lW !== NEG && lGain < lW - LN2;
+      lW = lAdd(lW, lGain);
+      h -= dt;
+      if (steady) break;
+    }
+    if (h > 0) {
+      const lk = lRh + lib + Math.log(100) + 0.5 * Math.log(2 / (d * F)) - LN2;
+      lW = 2 * lAdd(0.5 * lAdd(lW, lBankH + Math.log(h)), lk + Math.log(h));
+    }
+    return lW;
+  }
+  // points per day after rem hours of holding (no Ascend) from lW
+  const lDayAfter = (cfg, st, lW, rem) => lDayAt(cfg, st, lWAfter(cfg, st, lW, rem));
   function lShardsRaw(st, lP) { return Math.log(10) + 2 * (lP - Math.log(1000)) + lTenth(st.yld); }
   function lShardsAt(cfg, st, lP) {
     const l = lShardsRaw(st, lP);
@@ -240,7 +297,7 @@
     for (; i < n && c[i].te <= tLast; i++) if (c[i].t <= dt) lEnd = lAdd(lEnd, c[i].la + lpm);
     const lPend = lEnd > lNeed ? Math.max(lP, lPAff(lSub(lEnd, Math.log(cfg.minBal)), d)) : lP;
     const lGain = lShardsAt(cfg, st, lPend);
-    const lIB1 = lAdd(lIB0, lShardValue(cfg, st) + lGain);
+    const lIB1 = lIBat(cfg, st, lAdd(st.S, lGain));
     return (lIB1 - lIB0) / dt;
   }
   function snapTarget(cfg, st, lP) {
@@ -287,7 +344,7 @@
     const st = {
       t: t0 || 0, S: ln(cfg.shards), res: ln(cfg.res), yld: ln(cfg.yld), intr: ln(cfg.intr), rew: ln(cfg.rew), disc: cfg.disc,
       bankLv: cfg.bankLv, Wp: NEG, L: NEG, target: HOLD, bankNeed: NEG, lastAsc: -Infinity, yDebt: NEG, pDebt: NEG,
-      next: {}, heldP: cfg.P, heldR: cfg.R
+      next: {}, heldP: cfg.P, heldR: cfg.R, lEarn: NEG, lastDecide: t0 || 0
     };
     for (const k of KINDS) st.next[k] = st.t + Math.max(0, cfg.nextIn[k] !== undefined ? cfg.nextIn[k] : cfg.cooldown[k]);
     return st;
@@ -305,7 +362,7 @@
   }
   function rebalance(cfg, st) {
     if (st.bankNeed !== NEG) return;
-    const lRes = lReserve(cfg);
+    const lRes = lReserve(cfg, st);
     const lCt = st.target === HOLD ? Infinity : lCostToP(st.target, dOf(st));
     if (st.L > lRes && st.Wp < lCt) {
       const avail = lSub(st.L, lRes);
@@ -317,6 +374,7 @@
   function advance(cfg, st, dt) {
     if (dt <= 0) return;
     st.L = lAdd(st.L, lRate(cfg, st) + Math.log(dt));
+    st.lEarn = lAdd(st.lEarn, lRate(cfg, st) + Math.log(dt));
     st.t += dt;
     rebalance(cfg, st);
   }
@@ -327,21 +385,19 @@
   function claimRewards(cfg, st, log, atAscend) {
     if (!cfg.useRewards) return;
     const dueNow = k => (atAscend ? st.next[k] : st.next[k] + deferOf(cfg, st, k)) <= st.t + 1e-9;
-    if (KINDS.some(k => hasKind(cfg, k) && dueNow(k))) payPrestigeDebt(st);
-    // claims pay on all the prestige the points can buy: everything right before an Ascend, otherwise what is
-    // above the interest reserve and a pending bank upgrade
-    const lFree = atAscend ? st.L : lSub(st.L, lAdd(lReserve(cfg), st.bankNeed));
-    const lpm = lPm(lAdd(st.Wp, lFree), dOf(st));
+    const due = KINDS.filter(k => hasKind(cfg, k) && dueNow(k)).sort((a, b) => cfg.rewBase[a] - cfg.rewBase[b]);
+    if (due.length) payPrestigeDebt(st);
     const lib = lIB(cfg, st);
-    for (const k of KINDS) {
-      if (!hasKind(cfg, k)) continue;
-      const due = atAscend ? st.next[k] : st.next[k] + deferOf(cfg, st, k);
-      if (due <= st.t + 1e-9) {
-        const amt = Math.log(cfg.rewBase[k]) + lpm + lib + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
-        st.L = lAdd(st.L, amt);
-        st.next[k] = st.t + cfg.cooldown[k];
-        if (log) log.rewards.push({ t: st.t, kind: k, lpm: lpm, lamount: amt });
-      }
+    // smallest first: each claim pays on all the prestige the points can buy (everything right before an Ascend,
+    // otherwise what is above the interest reserve and a pending bank upgrade), earlier claims included
+    for (const k of due) {
+      const lFree = atAscend ? st.L : lSub(st.L, lAdd(lReserve(cfg, st), st.bankNeed));
+      const lpm = lPm(lAdd(st.Wp, lFree), dOf(st));
+      const amt = Math.log(cfg.rewBase[k]) + lpm + lib + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
+      st.L = lAdd(st.L, amt);
+      st.lEarn = lAdd(st.lEarn, amt);
+      st.next[k] = st.t + cfg.cooldown[k];
+      if (log) log.rewards.push({ t: st.t, kind: k, lpm: lpm, lamount: amt });
     }
     rebalance(cfg, st);
   }
@@ -360,7 +416,7 @@
     const lib = lIB(cfg, st);
     const lb0 = Math.log(cfg.rewBase.daily * (cfg.prime ? 2 : 1)) + lib + lTenth(st.rew);
     const lk = Math.log(cfg.rate * bankBonusOf(cfg, st)) + lTenth(st.intr) + lib;
-    return Math.max(0, (lReserve(cfg) - lb0) / Math.exp(Math.min(lk, 700)));
+    return Math.max(0, (lReserve(cfg, st) - lb0) / Math.exp(Math.min(lk, 700)));
   }
   // each Yield level adds a tenth of the Ascend's base shards and costs 5 x its level: right before the Ascend,
   // buy the levels that this Ascend alone pays back (shards up front, one click each)
@@ -390,12 +446,13 @@
     yieldTopUp(cfg, st, lP, log);
     const gain = lShardsAt(cfg, st, lP);
     st.S = lAdd(st.S, gain);
-    if (log) log.ascends.push({ t: st.t, lP: lP, lgain: gain, lS: st.S, lib: lIB(cfg, st), lrate: lRate(cfg, st), buys: [] });
+    const lDayPre = log ? lDay(cfg, st) : NEG;
     st.Wp = NEG; st.L = NEG; st.heldP = null; st.lastAsc = st.t;
+    if (log) log.ascends.push({ t: st.t, lP: lP, lgain: gain, lS: st.S, lib: lIB(cfg, st), lrate: lRate(cfg, st), lday: lDay(cfg, st), ldayPre: lDayPre, learn: st.lEarn, buys: [] });
     // with a loan the first reserve-worth of interest pays it back; without one the reserve is rebuilt during pen
     const pen = restartPenalty(cfg, st);
     if (pen > 0) st.t += pen;
-    if (!cfg.loan) st.L = lReserve(cfg);
+    if (!cfg.loan) st.L = lReserve(cfg, st);
     // purchases after this ascend happen once the bank is rebuilt
     if (log) { const a = log.ascends[log.ascends.length - 1]; a.tNext = st.t; a.restart = pen; }
     return lP;
@@ -414,21 +471,31 @@
     after.S = lAdd(after.S, lShardsAt(cfg, st, lP));
     const lI1 = lRate(cfg, after);
     if (cfg.objective === 'bo2') {
-      const lRes = lReserve(cfg);
+      const lRes = lReserve(cfg, st);
       const lIh = lRate(cfg, st);
       const vh = bo2Run(cfg, lSub(lAdd(lW, lIh + Math.log(rem)), lRes), lIB(cfg, st), d).tot;
       const va = bo2Run(cfg, lSub(lI1 + Math.log(rem), lRes), lIB(cfg, after), d).tot;
       return va > vh;
     }
-    const fresh = Math.exp(lAdd(lCostToP(Math.log(cfg.minP), d), Math.log(cfg.minBal)) - lI1);
-    return fresh < rem;
+    // an Ascend trades the Income the prestige gives for shards: compare points per day at the end
+    if (INCOME_GOALS[cfg.objective]) {
+      const lHold = lDayAfter(cfg, st, lHeld(cfg, st), rem);
+      const lAsc = lDayAfter(cfg, after, NEG, rem);
+      return lAsc > lHold;
+    }
+    // Income Bonus goals: shards only come from Ascends and count as √ above 10k, while rewards grow with the Income
+    // held, so compare Ascending now (and again on the date) with holding until the date and Ascending then
+    const lShW = lW2 => lShardsAt(cfg, st, lPAff(lW2, d));
+    const lHoldIB = lIBat(cfg, st, lAdd(st.S, lShW(lWAfter(cfg, st, lHeld(cfg, st), rem))));
+    const lAscIB = lIBat(cfg, after, lAdd(after.S, lShW(lWAfter(cfg, after, NEG, rem))));
+    return lAscIB > lHoldIB;
   }
 
-  // 'reach' targets an Income Bonus, 'reachRate' a bank income per hour; reaching it sooner always beats
+  // 'reach' targets an Income Bonus, 'reachRate' points per day; reaching it sooner always beats
   // not reaching it, whose value is ln(metric) < ln(target)
   const isReach = cfg => cfg.objective === 'reach' || cfg.objective === 'reachRate';
   const goalOf = cfg => cfg.objective === 'reach' ? Math.log(cfg.targetIB) : cfg.objective === 'reachRate' ? Math.log(cfg.targetRate) : Infinity;
-  const metricOf = (cfg, st) => cfg.objective === 'reachRate' ? lRate(cfg, st) : lIB(cfg, st);
+  const metricOf = (cfg, st) => cfg.objective === 'reachRate' ? lDay(cfg, st) : lIB(cfg, st);
   const reachValue = (cfg, t) => goalOf(cfg) + 1e6 - t;
 
   // one Zombies run entered at R100 of the prestige lWp buys; with reinvest each block's payout buys prestige
@@ -444,19 +511,19 @@
     return { tot: tot, lpm0: lpm0, lpm: lpm };
   }
 
-  // on the goal date the shards left are worth most as Resonance (Income Bonus) and, for bank income, Interest;
+  // on the goal date the shards left are worth most as Resonance (Income Bonus) and, for points per day, Rewards;
   // each level is one click, so at most maxClicks of them
   function finalShop(cfg, st) {
-    if (!cfg.allowShop || !(cfg.maxClicks >= 1)) return null;
-    const rate = cfg.objective === 'income' || cfg.objective === 'reachRate';
+    if (!cfg.allowShop || !(cfg.maxClicks >= 1) || cfg.objective === 'networth') return null;
+    const rate = INCOME_GOALS[cfg.objective] && cfg.useRewards;
     const C = Math.floor(cfg.maxClicks), sp = spendable(st);
     const lCost = (lL, n, base) => n > 0 ? Math.log(base) + lAdd(Math.log(n) + lL, Math.log(n) + lAdd(Math.log(n), 0) - LN2) : NEG;
     const view = (nr, ni) => {
-      const lcr = lCost(st.res, nr, BASE.res), lci = lCost(st.intr, ni, BASE.intr);
+      const lcr = lCost(st.res, nr, BASE.res), lci = lCost(st.rew, ni, BASE.rew);
       if (lAdd(lcr, lci) > sp) return null;
-      return Object.assign({}, st, { S: lSub(sp, lAdd(lcr, lci)), res: lAdd(st.res, ln(nr)), intr: lAdd(st.intr, ln(ni)), yDebt: NEG, pDebt: NEG, lcr: lcr, lci: lci });
+      return Object.assign({}, st, { S: lSub(sp, lAdd(lcr, lci)), res: lAdd(st.res, ln(nr)), rew: lAdd(st.rew, ln(ni)), yDebt: NEG, pDebt: NEG, lcr: lcr, lci: lci });
     };
-    const val = (nr, ni) => { const v = view(nr, ni); return v ? (rate ? lRate(cfg, v) : lIB(cfg, v)) : -Infinity; };
+    const val = (nr, ni) => { const v = view(nr, ni); return v ? (rate ? lDay(cfg, v) : lIB(cfg, v)) : -Infinity; };
     // integer argmax of a unimodal f on [0, hi]
     const argmax = (f, hi) => {
       let lo = 0;
@@ -473,28 +540,29 @@
     if (nr + ni === 0 || !(val(nr, ni) > val(0, 0))) return null;
     const v = view(nr, ni), out = [];
     if (nr > 0) out.push({ key: 'res', lfrom: st.res, lto: v.res, lcost: v.lcr });
-    if (ni > 0) out.push({ key: 'intr', lfrom: st.intr, lto: v.intr, lcost: v.lci });
-    st.S = v.S; st.yDebt = NEG; st.pDebt = NEG; st.res = v.res; st.intr = v.intr;
+    if (ni > 0) out.push({ key: 'rew', lfrom: st.rew, lto: v.rew, lcost: v.lci });
+    st.S = v.S; st.yDebt = NEG; st.pDebt = NEG; st.res = v.res; st.rew = v.rew;
     return out;
   }
 
   // ln of the final value for the chosen objective; atEnd: T is the goal date (not the end of a rollout window)
   function finalValue(cfg, st, log, atEnd) {
     if (isReach(cfg) && st.reached !== undefined) {
-      if (log) log.final = { lib: lIB(cfg, st), lrate: lRate(cfg, st), lS: st.S };
+      if (log) log.final = { lib: lIB(cfg, st), lrate: lRate(cfg, st), lday: lDay(cfg, st), learn: st.lEarn, lS: st.S };
       return reachValue(cfg, st.reached);
     }
     if (cfg.objective === 'bo2') {
       payPrestigeDebt(st);
       const lib = lIB(cfg, st);
-      const b = bo2Run(cfg, lAdd(st.Wp, lSub(st.L, lReserve(cfg))), lib, dOf(st));
+      const b = bo2Run(cfg, lHeld(cfg, st), lib, dOf(st));
       if (log) log.final = { lpm: b.lpm0, lpmEnd: b.lpm, lib: lib, lreward: b.tot };
       return st.limitAt !== undefined ? limitValue(st) : b.tot;
     }
     const fs = clone(st);
     // a bank upgrade still saving up on the date is dropped: its points go into the last Ascend
     fs.bankNeed = NEG;
-    if (canAscend(cfg, fs)) {
+    // point goals keep the prestige: it is the Income that pays the rewards
+    if (!INCOME_GOALS[cfg.objective] && canAscend(cfg, fs)) {
       fs.target = HOLD;
       const lP = doAscend(cfg, fs, null);
       if (log) log.finalAscend = { t: fs.t, lP: lP, lgain: lSub(fs.S, spendable(st)), lS: fs.S, lib: lIB(cfg, fs), lrate: lRate(cfg, fs) };
@@ -502,14 +570,15 @@
     const fb = atEnd ? finalShop(cfg, fs) : null;
     if (log) {
       if (fb) log.finalBuys = fb;
-      log.final = { lib: lIB(cfg, fs), lrate: lRate(cfg, fs), lS: fs.S };
+      log.final = { lib: lIB(cfg, fs), lrate: lRate(cfg, fs), lday: lDay(cfg, fs), learn: st.lEarn, lS: fs.S };
     }
     if (isReach(cfg)) {
       if (metricOf(cfg, fs) >= goalOf(cfg)) { if (log) log.reachedAt = st.t; return reachValue(cfg, st.t); }
       return metricOf(cfg, fs);
     }
     if (st.limitAt !== undefined) return limitValue(st);
-    return cfg.objective === 'income' ? lRate(cfg, fs) : lIB(cfg, fs);
+    if (cfg.objective === 'networth') return st.lEarn;
+    return cfg.objective === 'income' ? lDay(cfg, fs) : lIB(cfg, fs);
   }
   // past the number limit nothing more can be had, so reaching it sooner is better; any ln value under a limit of at
   // most ~14,300 bits stays far below 1e7
@@ -522,7 +591,10 @@
     const H = Math.min(168, Math.max(0, T - st.t));
     if (H <= 0) return;
     const P0 = pStar(cfg, paidView(st));
-    const score = x => { const v = paidView(x); return lIB(cfg, v) + growthAt(cfg, v, P0) * H; };
+    // point goals: points per day after H hours of holding; otherwise ln(IB) plus its growth over H
+    const score = INCOME_GOALS[cfg.objective]
+      ? x => { const v = paidView(x); return lDayAfter(cfg, v, lHeld(cfg, v), H); }
+      : x => { const v = paidView(x); return lIB(cfg, v) + growthAt(cfg, v, P0) * H; };
     let clicks = cfg.allowShop ? cfg.maxClicks : 0;
     for (let i = 0; i < 40 && clicks >= 1; i++) {
       const cur = score(st);
@@ -539,13 +611,12 @@
       applyBuy(cfg, st, best);
       clicks -= Math.round(Math.exp(best.n));
     }
-    // a bank level pays off when the faster growth beats the hours spent saving for it
+    // bank income is flat since 18.10: a level pays off when its extra interest over H covers its cost
     if (withBank && cfg.allowBank && st.bankLv < 20 && st.bankNeed === NEG && cfg.bankCosts[st.bankLv + 1] > 0) {
-      const v = paidView(st), up = clone(v);
+      const up = clone(st);
       up.bankLv++;
       const lC = Math.log(cfg.bankCosts[st.bankLv + 1]);
-      const Hb = H - Math.exp(lC - lRate(cfg, v));
-      if (Hb > 0 && lIB(cfg, up) + growthAt(cfg, up, P0) * Hb > score(st) + 1e-6) st.bankNeed = lC;
+      if (lSub(lRate(cfg, up), lRate(cfg, st)) + Math.log(H) > lC) st.bankNeed = lC;
     }
   }
   // policy: decide() applies purchases and sets st.target; shouldAscend() gates each ascend
@@ -553,6 +624,7 @@
     decide(cfg, st, T) { heuristicBuys(cfg, st, T); st.target = pStar(cfg, paidView(st)); },
     shouldAscend: baseShouldAscend
   };
+  const holdPolicy = { decide(cfg, st) { st.target = HOLD; }, shouldAscend: () => false };
   function fixedPolicy(P) {
     return {
       decide(cfg, st) { st.target = snapTarget(cfg, st, Math.log(P)); },
@@ -577,6 +649,7 @@
     };
     if (hit(st.t)) return finalValue(cfg, st, log, true);
     if (!firstDone) policy.decide(cfg, st, T, log);
+    st.lastDecide = st.t;
     if (hit(st.t)) return finalValue(cfg, st, log, true);
     rebalance(cfg, st);
     const lMinBal = Math.log(cfg.minBal);
@@ -584,15 +657,24 @@
     while (st.t < T - 1e-9 && guard++ < 400000) {
       const lI = lRate(cfg, st);
       const tr = nextActive(cfg, nextRewardTime(cfg, st));
+      const td = nextActive(cfg, st.lastDecide + DECIDE_EVERY);
       let te;
-      if (st.bankNeed !== NEG) te = nextActive(cfg, st.t + Math.exp(lSub(lAdd(st.bankNeed, lReserve(cfg)), st.L) - lI));
+      if (st.bankNeed !== NEG) te = nextActive(cfg, st.t + Math.exp(lSub(lAdd(st.bankNeed, lReserve(cfg, st)), st.L) - lI));
       else if (st.target === HOLD) te = Infinity;
       else te = nextActive(cfg, Math.max(st.lastAsc + cfg.minGap, st.t + Math.exp(lSub(lAdd(lCostToP(st.target, dOf(st)), lMinBal), lAdd(st.Wp, st.L)) - lI)));
-      const tn = Math.min(tr, te, T);
+      const tn = Math.min(tr, te, td, T);
       advance(cfg, st, tn - st.t);
       if (limitCheck(cfg, st, log)) { st.stopped = true; break; }
       if (tn >= T - 1e-9) break;
       if (tn === tr && tr <= te) { claimRewards(cfg, st, log); continue; }
+      if (tn === td && td < te) {
+        if (log) log.samples.push({ t: st.t, lib: lIB(cfg, st), lrate: lRate(cfg, st), lday: lDay(cfg, st), learn: st.lEarn });
+        policy.decide(cfg, st, T, log);
+        st.lastDecide = st.t;
+        if (hit(st.t)) break;
+        rebalance(cfg, st);
+        continue;
+      }
       if (st.bankNeed !== NEG) {
         st.L = lSub(st.L, st.bankNeed); st.bankNeed = NEG; st.bankLv++;
         if (log) log.bank.push({ t: st.t, lv: st.bankLv });
@@ -608,6 +690,7 @@
         if (log) log.ascends[log.ascends.length - 1].lPpre = lPre;
         if (hit(tA)) break;
         policy.decide(cfg, st, T, log);
+        st.lastDecide = st.t;
         if (hit(st.t)) break;
         rebalance(cfg, st);
       } else {
@@ -619,7 +702,7 @@
     return finalValue(cfg, st, log, T >= cfg.horizonH - 1e-9);
   }
 
-  function newLog() { return { ascends: [], rewards: [], bank: [], buys: [], targets: [] }; }
+  function newLog() { return { ascends: [], rewards: [], bank: [], buys: [], targets: [], samples: [] }; }
 
   // every level is one click in the bot, so a decision buys at most `clicks` levels in total
   function buyOptions(cfg, st, clicks) {
@@ -723,10 +806,18 @@
     const st = clone(st0);
     const log = newLog();
     const value = run(cfg, st, T, policy, log, false);
-    const pts = [{ t: st0.t, lib: lIB(cfg, st0), lrate: lRate(cfg, st0) }];
-    for (const a of log.ascends) pts.push({ t: a.t, lib: a.lib, lrate: a.lrate });
-    if (log.final && log.final.lrate !== undefined) pts.push({ t: st.stopped ? st.t : T, lib: log.final.lib, lrate: log.final.lrate });
-    else pts.push({ t: st.stopped ? st.t : T, lib: lIB(cfg, st), lrate: lRate(cfg, st) });
+    // chart points: start, daily samples, each Ascend (points per day drop there with the prestige), end
+    const pts = [{ t: st0.t, lib: lIB(cfg, st0), lrate: lRate(cfg, st0), lday: lDay(cfg, st0), learn: NEG }];
+    const mid = log.samples.slice();
+    for (const a of log.ascends) {
+      mid.push({ t: a.t - 1e-6, lib: null, lrate: a.lrate, lday: a.ldayPre, learn: a.learn });
+      mid.push({ t: a.t, lib: a.lib, lrate: a.lrate, lday: a.lday, learn: a.learn });
+    }
+    mid.sort((x, y) => x.t - y.t);
+    for (const p of mid) pts.push(Object.assign({}, p, { lib: p.lib === null ? pts[pts.length - 1].lib : p.lib }));
+    const tEnd = st.stopped ? st.t : T;
+    if (log.final && log.final.lrate !== undefined) pts.push({ t: tEnd, lib: log.final.lib, lrate: log.final.lrate, lday: log.final.lday, learn: log.final.learn });
+    else pts.push({ t: tEnd, lib: lIB(cfg, st), lrate: lRate(cfg, st), lday: lDay(cfg, st), learn: st.lEarn });
     return { value: value, log: log, pts: pts, stoppedAt: st.stopped ? st.t : null };
   }
 
@@ -737,11 +828,12 @@
     const budget = { left: cfg.budget || 2000 };
     const res = {
       cfg: cfg,
-      now: { lib: lIB(cfg, st0), lrate: lRate(cfg, st0), pm: cfg.R * (cfg.P + 1) },
+      now: { lib: lIB(cfg, st0), lrate: lRate(cfg, st0), lday: lDay(cfg, st0), lreserve: lReserve(cfg, st0), pm: cfg.R * (cfg.P + 1) },
       optimal: sample(cfg, st0, T, plannerPolicy(budget)),
       baselines: []
     };
     const noShop = Object.assign({}, cfg, { allowShop: false, allowBank: false });
+    res.baselines.push({ name: 'hold', run: sample(noShop, st0, T, holdPolicy) });
     res.baselines.push({ name: 'pstar', run: sample(noShop, st0, T, basePolicy) });
     for (const P of [1000, 1500, 2000, 3000]) res.baselines.push({ name: 'p' + P, P: P, run: sample(noShop, st0, T, fixedPolicy(P)) });
     return res;
@@ -749,7 +841,7 @@
 
   const api = {
     F, HOLD, NEG, LN10, defaults, bonusAt, storageAt, storageOf, claimFactor, activeHours, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
-    costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
+    lEff, lDay, lDayAt, lHeld, costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.NexusModel = api;
