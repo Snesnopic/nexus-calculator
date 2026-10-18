@@ -636,7 +636,7 @@ tbody tr:hover td { background: var(--sunk); }
     const lRes = M.lReserve(cfg, st);
     $('loanAmt').textContent = fmtL(lRes);
     $('bankDerived').textContent = '';
-    $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'),
+    $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'), ' (as in /bank: base and Prime are added to the artifact)',
       ' · storage ', el('b', null, NF(0).format(cfg.storage) + ' h'), ' · capped at ', el('b', null, fmtL(M.lRate(cfg, st)) + '/hr'), ' from ', el('b', null, fmtL(lRes)), ' in the bank');
     const away = 24 - M.activeHours(cfg);
     if (away > cfg.storage) $('bankDerived').append(el('br'), el('b', null, `You are away ${NF(1).format(away)} h a day but the storage fills in ${NF(0).format(cfg.storage)} h: you lose ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest.`));
@@ -683,6 +683,10 @@ tbody tr:hover td { background: var(--sunk); }
     if (L.fallbackAt !== undefined && L.fallbackAt < end) {
       w.append(el('p', { class: 'note' }, el('strong', null, 'From ' + fmtWhen(L.fallbackAt) + ' the plan is rougher. '),
         'The planner had used all its simulations by then, so later Ascends and purchases follow a simpler rule. Recalculate after a few Ascends for a sharper plan.'));
+    }
+    if (!cfg.useRewards && cfg.objective !== 'bo2') {
+      w.append(el('p', { class: 'note' }, el('strong', null, 'Rewards are not counted. '),
+        'Since 18 Oct daily, weekly and monthly are almost all of your income, and the bank alone stays flat. Tick “Count daily, weekly, monthly” under Advanced and enter the hours until each reward.'));
     }
     if (cfg.horizonH >= 24 * MAX_DAYS - 1) {
       w.append(el('p', { class: 'note' }, el('strong', null, 'Projections stop after 3 years. '), 'Pick an earlier date for an exact horizon.'));

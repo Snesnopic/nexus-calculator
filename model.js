@@ -385,7 +385,9 @@
   function claimRewards(cfg, st, log, atAscend) {
     if (!cfg.useRewards) return;
     const dueNow = k => (atAscend ? st.next[k] : st.next[k] + deferOf(cfg, st, k)) <= st.t + 1e-9;
-    const due = KINDS.filter(k => hasKind(cfg, k) && dueNow(k)).sort((a, b) => cfg.rewBase[a] - cfg.rewBase[b]);
+    // the order is by what each pays per unit of Income: Rewards boosts daily, weekly, monthly and primedaily only
+    const per = k => Math.log(cfg.rewBase[k]) + (REW_BOOSTED[k] ? lTenth(st.rew) : 0);
+    const due = KINDS.filter(k => hasKind(cfg, k) && dueNow(k)).sort((a, b) => per(a) - per(b));
     if (due.length) payPrestigeDebt(st);
     const lib = lIB(cfg, st);
     // smallest first: each claim pays on all the prestige the points can buy (everything right before an Ascend,
