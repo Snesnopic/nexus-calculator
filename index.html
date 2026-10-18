@@ -226,12 +226,19 @@ tbody tr:hover td { background: var(--sunk); }
         <fieldset>
           <legend>Zombies games</legend>
           <label class="check"><input id="playRuns" type="checkbox"> I play Zombies games</label>
+          <div class="f"><label for="gameType">What you play</label>
+            <select class="num" id="gameType"><option value="rounds">Zombies rounds</option><option value="gungame">Gun Game wins</option><option value="leroy">One Window (Leroy)</option></select></div>
           <div class="fields">
             <div class="f"><label for="playHours">Hours of play a day</label><input class="num" id="playHours" type="number" min="0" max="24" step="0.5"></div>
             <div class="f"><label for="runSetup">Minutes to start a game</label><input class="num" id="runSetup" type="number" min="0" step="1"></div>
           </div>
-          <div class="f"><label for="runProfile">Round reached : minutes from the start</label><input class="num" id="runProfile" type="text" placeholder="e.g. 50:40, 100:120, 110:200"></div>
-          <p class="hint">A few rounds of your usual map and when you reach them; the last one is as far as you get. Every 5 rounds pay 1.4 times the previous ones, so the plan stops each game where it pays the most per hour of play.</p>
+          <div class="f roundsonly"><label for="runProfile">Round reached : minutes from the start</label><input class="num" id="runProfile" type="text" placeholder="e.g. 50:40, 100:120, 110:200"></div>
+          <p class="hint roundsonly">A few rounds of your usual map and when you reach them; the last one is as far as you get. Every 5 rounds pay 1.4 times the previous ones, so the plan stops each game where it pays the most per hour of play.</p>
+          <div class="fields winonly">
+            <div class="f"><label for="winMinutes">Minutes per win</label><input class="num" id="winMinutes" type="number" min="1" step="1"></div>
+            <div class="f ggonly"><label for="ggPlayers">Players in the game</label><input class="num" id="ggPlayers" type="number" min="1" max="8" step="1"></div>
+          </div>
+          <p class="hint winonly">Count the games you lose too: minutes per win is your total time divided by your wins. Gun Game pays 3,470 and Leroy 1,735 times your round 25 bonus, times your Income Bonus, up to 2T per player in the game and 1T; a private server doubles them after the cap.</p>
           <p class="derived" id="runDerived"></p>
         </fieldset>
       </div>
@@ -264,7 +271,6 @@ tbody tr:hover td { background: var(--sunk); }
         <summary>Advanced</summary>
         <fieldset>
           <div class="fields">
-            <div class="f"><label for="rawCap">Hourly raw cap</label><input class="num" id="rawCap" type="text" inputmode="decimal"></div>
             <div class="f"><label for="minGap">Min hours between Ascends</label><input class="num" id="minGap" type="number" min="0.25" step="0.5"></div>
             <div class="f"><label for="maxClicks">Max upgrade clicks per Ascend</label><input class="num" id="maxClicks" type="number" min="0" step="10"></div>
             <div class="f"><label for="lookahead">Decision window (days)</label><input class="num" id="lookahead" type="number" min="3" max="60" step="1"></div>
@@ -355,18 +361,19 @@ tbody tr:hover td { background: var(--sunk); }
               <summary>Formulas and assumptions</summary>
               <ul>
                 <li><b>Income Bonus</b> (since the second 18 Oct update) = 1 + effective shards × 0.10 × (1 + 0.1 × Resonance) × shard multiplier. Up to 10,000 unspent shards count fully and above that only 10 × √(shards − 10,000) more (20,000 work like 11,000). The shard multiplier is the ×N that /stats shows: Prime ×1.2 times 1 + the sum of boosting the server +25%, 1st, 2nd and 3rd place in Networth, Prestige or a casino category +10%, +5% and +2% each, every solo map record +10%, Gun Game top 5 +30%, +20%, +10%, +5% and +2.5%. The old flat bonuses (Prime, boost, leaderboards, records) are gone.</li>
-                <li><b>Bank</b>: since 18 Oct an hour of interest is min(balance × interest rate × Income Bonus × (1 + 0.1 × Interest), 100B), and only the bank bonus and the stored hours come on top: at most 100B × bank bonus per hour (200B at Lv20), whatever your Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance that reaches the cap is 100B ÷ (rate × Income Bonus × Interest), a few million points once your Income Bonus is high; the plan keeps that much, and it is what you need back in the bank after an Ascend. Without a loan the plan assumes you rebuild it from /daily and /primedaily by claiming often.</li>
+                <li><b>Bank</b>: since 18 Oct an hour of interest is min(balance × interest rate × Income Bonus × (1 + 0.1 × Interest), 250B) (the cap was 100B until update #3), and only the bank bonus and the stored hours come on top: at most 250B × bank bonus per hour (500B at Lv20), whatever your Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance that reaches the cap is 250B ÷ (rate × Income Bonus × Interest), a few million points once your Income Bonus is high; the plan keeps that much, and it is what you need back in the bank after an Ascend. Without a loan the plan assumes you rebuild it from /daily and /primedaily by claiming often.</li>
                 <li><b>Online hours</b>: Ascends, shop purchases, prestige purchases and reward claims only happen between <b>From</b> and <b>Until</b>; a reward that becomes ready while you are away is claimed when you come back, and its cooldown restarts from then. Interest piles up while you are away for at most 40 h at bank Lv15, 8 h more per level up to 72 h at Lv19, and 96 h at Lv20 (4 h per level below Lv15); if you are away longer than that every day, the plan counts the lost hours. Stored hours survive an Ascend.</li>
                 <li><b>Min hours between Ascends</b>: how often you are willing to Ascend. Since 18 Oct the plan Ascends far less often anyway: an Ascend resets the Income your rewards pay on.</li>
                 <li><b>Bank levels</b>: +5% bank bonus per level (Lv15 = +70%), and +10% for Lv20 (+100%). Lv12–20 cost 1.5T, 5T, 15T, 50T, 150T, 350T, 750T, 1.5Qa, 3Qa. The plan ignores the artifacts the upgrades also need (60 Epic for Lv13, 10, 25 and 45 Legendary for Lv14–16, 15 and 30 Mythic for Lv17–18, 25 Eternal for Lv19, 10 Nexus for Lv20): check you have them, and lower <b>Artifact interest</b> if the upgrade takes the one you have equipped.</li>
                 <li><b>Ranks</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 − 0.05 × Discount). A full prestige costs 82,087,500 × (P+1). Matches the real costs.</li>
                 <li><b>Income</b> (prestige multiplier) = (P+1) × rank. P R100 costs the same as P+1 R1 but pays 100 times more.</li>
-                <li><b>Rewards</b>: daily and primedaily 100,000, weekly and primeweekly 1,000,000, monthly and primemonthly 10,000,000, each × Income × Income Bonus; the Rewards upgrade adds 10% per level to each of them (confirmed for primeweekly, assumed for primemonthly; the /shards text lists only daily, weekly, monthly and primedaily). Since 18 Oct (#2) each is capped after all bonuses: 2.4T for a daily, 24T for a weekly, 240T for a monthly, Prime ones included. With every reward and the bank at their caps an account makes about 32T a day, whatever its Income Bonus. Gun Game (up to 2.4T per player in the game, a game can last about 40 minutes) and One Window (PvE, up to 1.2T) are not in the plan. The plan holds the weekly and monthly ones for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
+                <li><b>Rewards</b>: daily and primedaily 100,000, weekly and primeweekly 1,000,000, monthly and primemonthly 10,000,000, each × Income × Income Bonus; the Rewards upgrade adds 10% per level to each of them (confirmed for primeweekly, assumed for primemonthly; the /shards text lists only daily, weekly, monthly and primedaily). Since 18 Oct (#2) each is capped after all bonuses: 2.4T for a daily, 24T for a weekly, 240T for a monthly, Prime ones included. With every reward and the bank at their caps an account makes about 40T a day (12T bank at Lv20, 27.7T rewards), whatever its Income Bonus. The plan holds the weekly and monthly ones for up to a quarter of their cooldown to claim them right before an Ascend, when prestige peaks.</li>
                 <li><b>Ascend</b>: only needs P ≥ 1000 and burns the whole bank, so the plan spends it all on prestige right before. It gives 10 × (P/1000)² × (1 + 0.1 × Yield) shards rounded down; rank doesn't count (confirmed: P1339 → 17, P2391 → 57, P2571 → 66). Right before each Ascend the plan buys the Yield levels that Ascend alone pays back. Since 18 Oct an Ascend is worth it only when its shards raise your Income Bonus more than losing your Income costs in rewards: with many shards already, only an Ascend that brings a lot more of them (a very high prestige) does.</li>
                 <li><b>Purchase timing</b>: a bank balance above the interest threshold earns nothing extra, and prestige only pays off when you claim daily, weekly or monthly (they scale with Income) or Ascend. So the plan keeps points in the bank and buys prestige right before those moments. Besides right after each Ascend, the plan checks the shop once a day. Resonance raises your Income Bonus at once and is bought as soon as the plan picks it; Interest only helps the bank reach its cap, so it is rarely worth it now. Discount and Rewards only matter when you buy prestige or claim rewards, so they are bought right before that; Yield only affects the next Ascend, so it is bought right before <code>/ascend</code>. Until then their shards stay unspent and keep raising your Income Bonus. On the goal date nothing comes after, so the shards left go into Resonance (and Rewards when the goal is points per day), up to the click limit.</li>
                 <li><b>Shard shop</b>: level L costs 5 × L shards (Rewards 3 × L, Discount max 5), as the shards guide says. Each click in the bot buys one level, so <b>Max upgrade clicks per Ascend</b> caps how many levels the plan buys after each Ascend and at each daily check. Levels add up rather than compound: an Interest Lv2 claim pays exactly ×1.20 (not ×1.21), and Resonance Lv1 gives 0.132x per shard with Prime, 0.11x without.</li>
                 <li><b>Growth since 18 Oct</b>: the bank no longer grows with your Income Bonus and shards above 10,000 count as a square root, so the old explosion is gone. What still scales is daily, weekly and monthly (Income × Income Bonus × Rewards): buying prestige with them raises the Income the next ones pay on. The Rewards upgrade (+10% per level on daily, weekly, monthly and primedaily) and Resonance are now the upgrades that matter most.</li>
                 <li><b>Zombies games</b>: each block of 5 rounds from round 10 pays 1500 × Income × Income Bonus × 1.4^(round/5 − 1) (measured in a game), doubled on private servers, so a game pays about 3.5 times its last block. No update has capped it: since the reward caps it is where a high Income and Income Bonus still pay off, and an Ascend resets the Income it pays on. With <b>I play Zombies games</b> the plan counts a game at the best stop round every few hours of play, paid on the Income you hold when it starts.</li>
+                <li><b>Gun Game and One Window</b> (update #3): winning Gun Game pays 3,470 × your round 25 bonus (1500 × 1.4⁴ × Income) × Income Bonus for every player in the game, up to 2T per player; beating Leroy pays 1,735 × the same, up to 1T. At P1000 R100 (Income 100,100) both reach the cap even with Income Bonus 1x. A private server doubles them after the cap. Choose them under <b>What you play</b> with your minutes per win.</li>
                 <li><b>Big numbers</b>: points, shards, prestige and levels are stored as logarithms, so the projection reaches about 10^(10^300) without overflowing (precision stays around 15 significant digits). <b>Number limit</b> stops the projection when your networth (the one you enter plus everything you earn from now on) or the bank plus the prestige you hold would pass the largest signed integer of that size: 2^63 ≈ 9.2 Qi for 64-bit, the usual database integer. The bot has a limit like this: the 18 Oct nerf came from a weekly that was about to hit it. About 770 digits is the longest number a Discord embed field can show with separators, about 4,300 digits is Python's default limit for printing an integer. Projections stop after 3 years.</li>
                 <li><b>Goals</b>: <b>points per day</b> is bank interest plus your daily, weekly and monthly rewards spread over their cooldowns, at the Income you hold on the date; <b>points earned</b> adds up everything you earn until the date, like the networth. <b>Reach a target</b>: the plan stops as soon as your Income Bonus or your points per day get to the target, and every choice is judged by how early that happens. When the target is further away than the decision window, a choice is judged by the Income Bonus it reaches by the end of the window.</li>
                 <li><b>Optimiser</b>: at every Ascend and once a day it tries shop purchases and target prestiges (including never Ascending), simulates the following days for each, and keeps the best. "Min hours between Ascends" caps how often you have to act.</li>
@@ -409,9 +416,9 @@ tbody tr:hover td { background: var(--sunk); }
   const $ = id => document.getElementById(id);
   const KEY = 'nexus-calculator-v2';
   const NEG = -Infinity, LN10 = Math.LN10;
-  const NUM_IDS = ['P', 'R', 'shards', 'mult', 'playHours', 'runSetup', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly', 'nPWeekly', 'nPMonthly',
+  const NUM_IDS = ['P', 'R', 'shards', 'mult', 'playHours', 'runSetup', 'winMinutes', 'ggPlayers', 'res', 'yld', 'intr', 'rew', 'disc', 'bankLv', 'artifact', 'nDaily', 'nPrime', 'nWeekly', 'nMonthly', 'nPWeekly', 'nPMonthly',
     'minGap', 'maxClicks', 'lookahead', 'round', 'targetIB', 'rP', 'rR', 'rIB'];
-  const TXT_IDS = ['bal', 'networth', 'runProfile', 'rawCap', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
+  const TXT_IDS = ['bal', 'networth', 'runProfile', 'gameType', 'targetDate', 'objective', 'limitBits', 'activeFrom', 'activeTo', 'targetRate', 'paste'];
   const CHK_IDS = ['prime', 'priv', 'playRuns', 'loan', 'allowShop', 'allowBank', 'useRewards', 'reinvest', 'rUseAcc', 'rReinvest'];
   const POINT_GOALS = { income: true, reachRate: true, networth: true };
   const KIND_CMD = { daily: '/daily', prime: '/primedaily', weekly: '/weekly', monthly: '/monthly', pweekly: '/primeweekly', pmonthly: '/primemonthly', run: 'a Zombies game' };
@@ -439,10 +446,10 @@ tbody tr:hover td { background: var(--sunk); }
   // example account, replaced by whatever the visitor enters (kept in this browser)
   // a fresh account until the visitor enters theirs (kept in this browser)
   const DEFAULTS = {
-    P: 0, R: 1, shards: 0, mult: 1, playHours: 2, runSetup: 3, res: 0, yld: 0, intr: 0, rew: 0, disc: 0, bankLv: 1, artifact: 0,
+    P: 0, R: 1, shards: 0, mult: 1, playHours: 2, runSetup: 3, winMinutes: 20, ggPlayers: 1, res: 0, yld: 0, intr: 0, rew: 0, disc: 0, bankLv: 1, artifact: 0,
     nDaily: 0, nPrime: 0, nWeekly: 0, nMonthly: 0, nPWeekly: 0, nPMonthly: 0, minGap: 3, maxClicks: 100, lookahead: 14, round: 150, targetIB: 1000,
     rP: 0, rR: 1, rIB: 1,
-    bal: '0', networth: '0', runProfile: '', rawCap: '100B', targetRate: '1T', activeFrom: '00:00', activeTo: '00:00', targetDate: defaultDate(), objective: 'income', limitBits: '64', paste: '',
+    bal: '0', networth: '0', runProfile: '', gameType: 'rounds', targetRate: '1T', activeFrom: '00:00', activeTo: '00:00', targetDate: defaultDate(), objective: 'income', limitBits: '64', paste: '',
     prime: false, priv: false, playRuns: false, loan: false, allowShop: true, allowBank: true, useRewards: true, reinvest: false,
     rUseAcc: true, rReinvest: false
   };
@@ -545,11 +552,21 @@ tbody tr:hover td { background: var(--sunk); }
     c.playRuns = $('playRuns').checked;
     const prof = parseProfile($('runProfile').value);
     $('runProfile').classList.toggle('bad', prof === null);
-    c.run = prof ? bestRun(prof, Math.max(0, num('runSetup', 3)), c.privateServer) : null;
+    const setup = Math.max(0, num('runSetup', 3)), type = $('gameType').value, mult = c.privateServer ? 2 : 1;
+    if (type === 'rounds') c.run = prof ? bestRun(prof, setup, c.privateServer) : null;
+    else {
+      // round 25 bonus = 1500 × 1.4^4 per Income; Gun Game pays 3,470 of them per player in the game, Leroy 1,735;
+      // a private server doubles both after the cap
+      const players = type === 'gungame' ? Math.min(8, Math.max(1, Math.round(num('ggPlayers', 1)))) : 1;
+      const k = type === 'gungame' ? 3470 : 1735, cap = type === 'gungame' ? 2e12 : 1e12;
+      c.run = { type: type, minutes: Math.max(1, num('winMinutes', 20)) + setup, base: k * 1500 * Math.pow(1.4, 4) * players * mult, cap: cap * players * mult };
+    }
+    if (c.run && !c.run.type) c.run.type = 'rounds';
     const hours = Math.min(24, Math.max(0, num('playHours', 0)));
     if (c.run && hours > 0) {
       c.run.perDay = hours * 60 / c.run.minutes;
       c.rewBase.run = c.run.base;
+      c.rewCap.run = c.run.cap || 0;
       c.cooldown.run = 24 / c.run.perDay;
       c.nextIn.run = 0;
     }
@@ -569,8 +586,6 @@ tbody tr:hover td { background: var(--sunk); }
     c.activeFrom = hhmm('activeFrom', 9); c.activeTo = hhmm('activeTo', 22);
     const now = new Date(NOW); c.clock0 = now.getHours() + now.getMinutes() / 60;
     c.rate = ((c.prime ? 1.25 : 0.25) + Math.max(0, num('artifact', 0))) / 100;
-    const raw = parsePts($('rawCap').value);
-    c.rawCap = isFinite(raw) && raw > 0 ? raw : 1e11;
     c.nextIn = { daily: num('nDaily', 24), prime: num('nPrime', 24), weekly: num('nWeekly', 168), monthly: num('nMonthly', 720),
       pweekly: num('nPWeekly', 168), pmonthly: num('nPMonthly', 720) };
     c.loan = $('loan').checked;
@@ -702,9 +717,13 @@ tbody tr:hover td { background: var(--sunk); }
     // a game at the best stop round, paid on the Income the points held buy now
     const rd = $('runDerived'); rd.textContent = '';
     if (cfg.run) {
-      const lpay = Math.log(cfg.run.base) + M.lPm(M.lHeld(cfg, st), M.dOf(st)) + lib;
-      const parts = ['Stop each game at ', el('b', null, 'round ' + cfg.run.round), ` (about ${fmtDur(cfg.run.minutes / 60)} with the setup): it pays `, el('b', null, fmtL(lpay)), ' with the prestige your points buy now'];
-      if (cfg.run.perDay) parts.push(cfg.run.perDay >= 1 ? `; ${NF(1).format(cfg.run.perDay)} games fit in your hours, ` : `; with your hours that is one game every ${NF(1).format(1 / cfg.run.perDay)} days, `,
+      const lraw = Math.log(cfg.run.base) + M.lPm(M.lHeld(cfg, st), M.dOf(st)) + lib;
+      const lpay = cfg.run.cap ? Math.min(lraw, Math.log(cfg.run.cap)) : lraw;
+      const what = cfg.run.type === 'rounds' ? ['Stop each game at ', el('b', null, 'round ' + cfg.run.round), ` (about ${fmtDur(cfg.run.minutes / 60)} with the setup): it pays `]
+        : [cfg.run.type === 'gungame' ? 'A Gun Game win' : 'Beating Leroy', ` (about ${fmtDur(cfg.run.minutes / 60)} each) pays `];
+      const parts = what.concat([el('b', null, fmtL(lpay)), !cfg.run.cap || lraw >= Math.log(cfg.run.cap) ? ' (the cap)' : ` (the cap, ${fmtL(Math.log(cfg.run.cap))}, needs ${NF(1).format(Math.exp(Math.log(cfg.run.cap) - lraw))}× more Income × Income Bonus)`, ' with the prestige your points buy now']);
+      if (cfg.run.type === 'rounds') parts.splice(4, 1);
+      if (cfg.run.perDay) parts.push(cfg.run.perDay >= 1 ? `; ${NF(1).format(cfg.run.perDay)} of them fit in your hours, ` : `; with your hours that is one every ${NF(1).format(1 / cfg.run.perDay)} days, `,
         el('b', null, fmtL(lpay + Math.log(cfg.run.perDay)) + '/day'));
       rd.append(...parts, '.');
     }
@@ -718,8 +737,8 @@ tbody tr:hover td { background: var(--sunk); }
     $('roRes').textContent = fmtL(lRes);
     const bn = $('roBankNote'); bn.textContent = '';
     const lBal = lnOf(cfg.bal);
-    bn.append(lBal >= lRes ? `Your bank already reaches the 100B/hr cap: keep at least ${fmtL(lRes)} in it when you /claiminterest.`
-      : `To be paid the full 100B for every stored hour, have ${fmtL(lRes)} in the bank when you /claiminterest: borrow ${fmtL(M.lSub(lRes, lBal))} more and pay it back right after.`);
+    bn.append(lBal >= lRes ? `Your bank already reaches the hourly cap: keep at least ${fmtL(lRes)} in it when you /claiminterest.`
+      : `To be paid the full ${fmtL(Math.log(cfg.rawCap))} for every stored hour, have ${fmtL(lRes)} in the bank when you /claiminterest: borrow ${fmtL(M.lSub(lRes, lBal))} more and pay it back right after.`);
     $('bankDerived').textContent = '';
     $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'), ' (as in /bank: base and Prime are added to the artifact)',
       ' · storage ', el('b', null, NF(0).format(cfg.storage) + ' h'), ' · capped at ', el('b', null, fmtL(M.lRate(cfg, st)) + '/hr'), ' from ', el('b', null, fmtL(lRes)), ' in the bank');
@@ -816,9 +835,12 @@ tbody tr:hover td { background: var(--sunk); }
       away > cfg.storage ? ` You are away ${NF(1).format(away)} h a day but at bank Lv${cfg.bankLv} the storage only holds ${NF(0).format(cfg.storage)} h, so ${NF(0).format((away - cfg.storage) / 24 * 100)}% of the interest is lost; the plan already counts that, and bank levels (the next one adds ${NF(0).format(M.storageAt(cfg.bankLv + 1) - cfg.storage)} h) are worth more to you.`
         : away > 0 ? ` The storage holds ${NF(0).format(cfg.storage)} h, more than your ${NF(1).format(away)} h away, so nothing is lost overnight.` : ''));
     if (cfg.playRuns && cfg.run && cfg.run.perDay) {
-      const often = cfg.run.perDay >= 1 ? `${NF(1).format(cfg.run.perDay)} Zombies games a day` : `one Zombies game every ${NF(1).format(1 / cfg.run.perDay)} days`;
-      ol.append(li(`Play ${often}${cfg.privateServer ? ' on your private server' : ''} and stop each at round ${cfg.run.round}: further on, 5 more rounds take longer than they are worth. Buy prestige (`,
-        cmd('/prestigeupto'), ', ', cmd('/rankupmax'), ') before every game: it pays on the Income you hold.'));
+      const noun = cfg.run.type === 'rounds' ? 'Zombies games' : cfg.run.type === 'gungame' ? 'Gun Game wins' : 'Leroy wins';
+      const often = cfg.run.perDay >= 1 ? `${NF(1).format(cfg.run.perDay)} ${noun} a day` : `one of your ${noun} every ${NF(1).format(1 / cfg.run.perDay)} days`;
+      ol.append(li(`Play: ${often}${cfg.privateServer ? ' on your private server' : ''}`,
+        cfg.run.type === 'rounds' ? `, stopping each game at round ${cfg.run.round}: further on, 5 more rounds take longer than they are worth. ` : '. ',
+        'Buy prestige (', cmd('/prestigeupto'), ', ', cmd('/rankupmax'), ') before playing: the payout grows with the Income you hold',
+        cfg.run.type === 'rounds' ? '.' : ', up to the cap at about P1000 R100 without Income Bonus.'));
     }
     const shop0 = now0.filter(b => b.key !== 'bank'), bank0 = buys0.filter(b => b.key === 'bank');
     if (shop0.length) ol.append(li('Buy in the shard shop now: ', buysText(shop0), '. Your Income Bonus becomes ', fmtIBL(M.lIB(cfg, stNow)), ', and the next Ascends pay it back.'));
@@ -1187,6 +1209,10 @@ tbody tr:hover td { background: var(--sunk); }
     clampRank('R'); clampRank('rR');
     save();
     document.querySelectorAll('.bo2only').forEach(e => { e.hidden = $('objective').value !== 'bo2'; });
+    const gt = $('gameType').value;
+    document.querySelectorAll('.roundsonly').forEach(e => { e.hidden = gt !== 'rounds'; });
+    document.querySelectorAll('.winonly').forEach(e => { e.hidden = gt === 'rounds'; });
+    document.querySelectorAll('.ggonly').forEach(e => { e.hidden = gt !== 'gungame'; });
     document.querySelectorAll('.reachonly').forEach(e => { e.hidden = $('objective').value !== 'reach'; });
     document.querySelectorAll('.reachrateonly').forEach(e => { e.hidden = $('objective').value !== 'reachRate'; });
     document.querySelector('label[for="targetDate"]').textContent = /^reach/.test($('objective').value) ? 'Search until' : 'Date';
@@ -1238,7 +1264,8 @@ tbody tr:hover td { background: var(--sunk); }
       'Nexus calculator, ' + new Date(NOW).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + ' local time',
       `Account: P${v('P')} R${v('R')}, bank ${v('bal')}, networth ${v('networth') || 0}, ${v('shards')} unspent shards, shard multiplier ×${v('mult') || 1}, Prime ${on('prime')}, private server ${on('priv')}`,
       `Shard upgrades: Resonance ${v('res')}, Yield ${v('yld')}, Interest ${v('intr')}, Rewards ${v('rew')}, Discount ${v('disc')}`,
-      `Bank: level ${v('bankLv')}, artifact +${v('artifact')}%/hr, raw cap ${v('rawCap')}/hr`,
+      `Bank: level ${v('bankLv')}, artifact +${v('artifact')}%/hr`,
+      `Games: ${on('playRuns')}, ${sel('gameType')}, ${v('playHours')} h a day, ${v('runSetup')} min to start` + (v('gameType') === 'rounds' ? `, profile ${v('runProfile') || '-'}` : `, ${v('winMinutes')} min a win` + (v('gameType') === 'gungame' ? `, ${v('ggPlayers')} players` : '')),
       `Online: ${v('activeFrom')}–${v('activeTo')}`,
       `Hours to next reward: daily ${v('nDaily')}, primedaily ${v('nPrime')}, weekly ${v('nWeekly')}, monthly ${v('nMonthly')}, primeweekly ${v('nPWeekly')}, primemonthly ${v('nPMonthly')}`,
       `Settings: min ${v('minGap')} h between Ascends, max ${v('maxClicks')} upgrade clicks per Ascend, decision window ${v('lookahead')} days, ` +

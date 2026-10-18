@@ -58,7 +58,7 @@
       shards: 0, prime: false, server: 0, other: 0,
       res: 0, yld: 0, intr: 0, rew: 0, disc: 0,
       P: 0, R: 1, bal: 0, networth: 0,
-      bankLv: 1, bankBonus: 1, rate: 0.0025, rawCap: 1e11, activeFrom: 0, activeTo: 0, clock0: 0,
+      bankLv: 1, bankBonus: 1, rate: 0.0025, rawCap: 2.5e11, activeFrom: 0, activeTo: 0, clock0: 0,
       bankCosts: bankCostTable(),
       rewBase: { daily: 1e5, prime: 1e5, weekly: 1e6, monthly: 1e7, pweekly: 1e6, pmonthly: 1e7, run: 0 },
       // since 18.10 #2 each reward is capped after all bonuses
@@ -110,8 +110,8 @@
   }
   // interest piles up while you are away, but only for as many hours as the storage holds
   function claimFactor(cfg, st) { return Math.min(1, (activeHours(cfg) + storageOf(cfg, st)) / 24); }
-  // since 18.10 the hourly cap applies after the Income Bonus and Interest, and only the facility bonus and the stored
-  // hours come on top: every balance at or above the reserve earns rawCap × bonus
+  // since 18.10 the hourly cap (250B since update #3) applies after the Income Bonus and Interest, and only the
+  // facility bonus and the stored hours come on top: every balance at or above the reserve earns rawCap × bonus
   function lRate(cfg, st) { return Math.log(cfg.rawCap * bankBonusOf(cfg, st) * claimFactor(cfg, st)); }
   function dOf(st) { return 1 - 0.05 * st.disc; }
   function lReserve(cfg, st) { return Math.log(cfg.rawCap / cfg.rate) - lIB(cfg, st) - lTenth(st.intr); }
