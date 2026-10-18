@@ -168,7 +168,7 @@ tbody tr:hover td { background: var(--sunk); }
             <div class="f"><label for="R">Rank (1–100)</label><input class="num" id="R" type="number" min="1" max="100" step="1"></div>
             <div class="f"><label for="bal">Bank balance</label><input class="num" id="bal" type="text" inputmode="decimal" placeholder="e.g. 1.5T"></div>
             <div class="f"><label for="shards">Unspent shards</label><input class="num" id="shards" type="number" min="0" step="1"></div>
-            <div class="f"><label for="mult">Shard multiplier (×)</label><input class="num" id="mult" type="number" min="1" step="0.01"></div>
+            <div class="f"><label for="mult">Shard multiplier (× in /stats)</label><input class="num" id="mult" type="number" min="1" step="0.01"></div>
             <div class="f"><label for="networth">Networth (from /stats)</label><input class="num" id="networth" type="text" inputmode="decimal" placeholder="e.g. 98T"></div>
           </div>
           <div class="checks">
@@ -338,7 +338,7 @@ tbody tr:hover td { background: var(--sunk); }
             <details>
               <summary>Formulas and assumptions</summary>
               <ul>
-                <li><b>Income Bonus</b> (since the second 18 Oct update) = 1 + effective shards × 0.10 × 1.2 with Prime × (1 + 0.1 × Resonance) × shard multiplier. Up to 10,000 unspent shards count fully and above that only 10 × √(shards − 10,000) more (20,000 work like 11,000). The shard multiplier is the ×N that /stats shows: boosting the server +25%, 1st, 2nd and 3rd place in Networth, Prestige or a casino category +10%, +5% and +2% each, every solo map record +10%, Gun Game top 5 +30%, +20%, +10%, +5% and +2.5%. The old flat bonuses (Prime, boost, leaderboards, records) are gone.</li>
+                <li><b>Income Bonus</b> (since the second 18 Oct update) = 1 + effective shards × 0.10 × (1 + 0.1 × Resonance) × shard multiplier. Up to 10,000 unspent shards count fully and above that only 10 × √(shards − 10,000) more (20,000 work like 11,000). The shard multiplier is the ×N that /stats shows: Prime ×1.2 times 1 + the sum of boosting the server +25%, 1st, 2nd and 3rd place in Networth, Prestige or a casino category +10%, +5% and +2% each, every solo map record +10%, Gun Game top 5 +30%, +20%, +10%, +5% and +2.5%. The old flat bonuses (Prime, boost, leaderboards, records) are gone.</li>
                 <li><b>Bank</b>: since 18 Oct an hour of interest is min(balance × interest rate × Income Bonus × (1 + 0.1 × Interest), 100B), and only the bank bonus and the stored hours come on top: at most 100B × bank bonus per hour (200B at Lv20), whatever your Income Bonus. Interest rate = 1.25%/hr with Prime (0.25% without) + artifact. The balance that reaches the cap is 100B ÷ (rate × Income Bonus × Interest), a few million points once your Income Bonus is high; the plan keeps that much, and it is what you need back in the bank after an Ascend. Without a loan the plan assumes you rebuild it from /daily and /primedaily by claiming often.</li>
                 <li><b>Online hours</b>: Ascends, shop purchases, prestige purchases and reward claims only happen between <b>From</b> and <b>Until</b>; a reward that becomes ready while you are away is claimed when you come back, and its cooldown restarts from then. Interest piles up while you are away for at most 40 h at bank Lv15, 8 h more per level up to 72 h at Lv19, and 96 h at Lv20 (4 h per level below Lv15); if you are away longer than that every day, the plan counts the lost hours. Stored hours survive an Ascend.</li>
                 <li><b>Min hours between Ascends</b>: how often you are willing to Ascend. Since 18 Oct the plan Ascends far less often anyway: an Ascend resets the Income your rewards pay on.</li>
@@ -575,7 +575,12 @@ tbody tr:hover td { background: var(--sunk); }
     if ((m = text.match(/(\d[\d.,]*)\s+unspent/i)) || (m = text.match(/(\d[\d.,]*)\s+shards\s*\S\s*\+/i))) found.shards = parsePts(m[1]);
     if (/Prime\s*\n\s*Active/i.test(text) || /\(Prime\)/i.test(text)) found.prime = true;
     if ((m = text.match(/Networth:\s*([\d.,]+)\s*points/i))) found.networth = m[1];
-    if ((m = text.match(/×\s*([\d.]+)/))) found.mult = parseFloat(m[1]);
+    // /stats shows the multiplier with Prime ×1.2 included ("×1.74 (Prime ×1.2, boost, 2 placements)"); an older
+    // format left Prime out
+    if ((m = text.match(/×\s*([\d.]+)\s*(\([^)]*\))?/))) {
+      const prime = found.prime || $('prime').checked;
+      found.mult = parseFloat(m[1]) * (prime && !/prime/i.test(m[2] || '') ? 1.2 : 1);
+    }
     const p = after('prestige'); if (p && /^[\d.,]+$/.test(p)) found.P = parsePts(p);
     const r = after('rank'); if (r && /^[\d.,]+$/.test(r)) found.R = Math.min(100, parsePts(r));
     const b = after('bank balance') || after('bank') || after('new bank'); if (b && /points/i.test(b)) found.bal = b.replace(/\s*points?/i, '');

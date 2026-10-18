@@ -77,8 +77,8 @@
 
   // ---- base formulas (log domain) ----
   // since the 18.10 rework the Income Bonus is 1 plus the shard bonus only; above 10,000 unspent shards only
-  // 10·√(S − 10,000) more count, and the shard bonus is multiplied by the shard multiplier /stats shows (boost +25%,
-  // leaderboard spots +10/5/2%, solo records +10%, Gun Game top 5 +30..2.5%); Prime makes each shard count 1.2x
+  // 10·√(S − 10,000) more count; each counts 0.10 × (1 + 0.1·Resonance) × the shard multiplier /stats shows, which
+  // includes Prime ×1.2 and 1 + boost 25% + leaderboard spots 10/5/2% + solo records 10% + Gun Game top 5 30..2.5%
   function constIB(cfg) { return 1; }
   const L_SOFT = Math.log(1e4);
   function lEff(lS) {
@@ -87,7 +87,7 @@
     return l < Math.log(1e15) ? Math.log(Math.floor(Math.exp(l) + 1e-9)) : l;
   }
   function shardMult(cfg) { return cfg.mult > 0 ? cfg.mult : 1; }
-  function lShardValue(cfg, st) { return Math.log((cfg.prime ? 0.12 : 0.10) * shardMult(cfg)) + lTenth(st.res); }
+  function lShardValue(cfg, st) { return Math.log(0.10 * shardMult(cfg)) + lTenth(st.res); }
   function lIBat(cfg, st, lS) { return lAdd(Math.log(constIB(cfg)), lShardValue(cfg, st) + lEff(lS)); }
   function lIB(cfg, st) { return lIBat(cfg, st, st.S); }
   // +5% per level, but Lv20 jumps from x1.90 to x2.00
