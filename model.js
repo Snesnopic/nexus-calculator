@@ -10,7 +10,8 @@
   // primeweekly / primemonthly pay like weekly / monthly; the Rewards upgrade only lists the first four
   const KINDS = ['daily', 'prime', 'weekly', 'monthly', 'pweekly', 'pmonthly'];
   const PRIME_ONLY = { prime: true, pweekly: true, pmonthly: true };
-  const REW_BOOSTED = { daily: true, prime: true, weekly: true, monthly: true };
+  // the Rewards upgrade boosts every reward: confirmed for primeweekly (18.10), assumed for primemonthly
+  const REW_BOOSTED = { daily: true, prime: true, weekly: true, monthly: true, pweekly: true, pmonthly: true };
   const DEFERRED = { weekly: true, monthly: true, pweekly: true, pmonthly: true };
   const hasKind = (cfg, k) => !PRIME_ONLY[k] || cfg.prime;
   // goals measured in points (per day or in total), where the Income held matters more than the shards
