@@ -651,23 +651,33 @@ tbody tr:hover td { background: var(--sunk); }
     };
     let m;
     if ((m = text.match(/(\d[\d.,]*)\s+unspent/i)) || (m = text.match(/(\d[\d.,]*)\s+shards\s*\S\s*\+/i))) found.shards = parsePts(m[1]);
-    if (/Prime\s*\n\s*Active/i.test(text) || /\(Prime\)/i.test(text)) found.prime = true;
+    // Prime: /stats "Prime / Active|Inactive", /shards "(Prime)", a bank payout "Prime Bonus +1%/hr" or "+0%/hr"
+    const pr = after('prime');
+    if (pr && /^active/i.test(pr)) found.prime = true;
+    else if (pr && /^inactive/i.test(pr)) found.prime = false;
+    else if (/\(Prime\)/i.test(text)) found.prime = true;
+    else if ((m = after('prime bonus')) && /\+?([\d.]+)%/.test(m)) found.prime = parseFloat(m.match(/([\d.]+)%/)[1]) > 0;
+    const prime = found.prime !== undefined ? found.prime : $('prime').checked;
     if ((m = text.match(/Networth:\s*([\d.,]+)\s*points/i))) found.networth = m[1];
-    // /stats shows the multiplier with Prime ×1.2 included ("×1.74 (Prime ×1.2, boost, 2 placements)"); an older
-    // format left Prime out
-    if ((m = text.match(/×\s*([\d.]+)\s*(\([^)]*\))?/))) {
-      const prime = found.prime || $('prime').checked;
-      found.mult = parseFloat(m[1]) * (prime && !/prime/i.test(m[2] || '') ? 1.2 : 1);
-    }
+    const up = [['res', /Shard Resonance\s*\S\s*Lv\s*(\d+)/i], ['yld', /Shard Yield\s*\S\s*Lv\s*(\d+)/i], ['intr', /(?:^|\n)\W*Interest\s*[^\w\s]\s*Lv\s*(\d+)/i],
+      ['rew', /Rewards\s*[^\w\s]\s*Lv\s*(\d+)/i], ['disc', /Prestige Discount\s*[^\w\s]\s*Lv\s*(\d+)/i]];
+    for (const [k, re] of up) if ((m = text.match(re))) found[k] = +m[1];
+    // shard multiplier: best from /shards "Every unspent shard gives +0.6612x" = 0.10 × (1 + 0.1·Resonance) × multiplier;
+    // otherwise the ×N of /stats (Prime ×1.2 included) or of /shards (without Prime)
+    const res = found.res !== undefined ? found.res : Math.max(0, Math.round(num('res', 0)));
+    if ((m = text.match(/Every unspent shard gives \+([\d.]+)x/i))) found.mult = Math.round(parseFloat(m[1]) / (0.1 * (1 + 0.1 * res)) * 1000) / 1000;
+    else if ((m = text.match(/×\s*([\d.]+)\s*(\([^)]*\))?/))) found.mult = parseFloat(m[1]) * (prime && !/prime/i.test(m[2] || '') ? 1.2 : 1);
     const p = after('prestige'); if (p && /^[\d.,]+$/.test(p)) found.P = parsePts(p);
     const r = after('rank'); if (r && /^[\d.,]+$/.test(r)) found.R = Math.min(100, parsePts(r));
     const b = after('bank balance') || after('bank') || after('new bank'); if (b && /points/i.test(b)) found.bal = b.replace(/\s*points?/i, '');
     const lv = after('bank level') || after('bank lv'); if (lv && (m = lv.match(/^(\d+)/))) found.bankLv = +m[1];
-    const ir = after('interest rate'); if (ir && (m = ir.match(/([\d.]+)%/))) found.artifact = Math.max(0, parseFloat(m[1]) - (found.prime || $('prime').checked ? 1.25 : 0.25));
-    const ib = after('income bonus'); if (ib && (m = ib.match(/([\d.]+)x/))) botIB = parseFloat(m[1]);
-    const up = [['res', /Shard Resonance\s*\S\s*Lv\s*(\d+)/i], ['yld', /Shard Yield\s*\S\s*Lv\s*(\d+)/i], ['intr', /(?:^|\n)\W*Interest\s*[^\w\s]\s*Lv\s*(\d+)/i],
-      ['rew', /Rewards\s*[^\w\s]\s*Lv\s*(\d+)/i], ['disc', /Prestige Discount\s*[^\w\s]\s*Lv\s*(\d+)/i]];
-    for (const [k, re] of up) if ((m = text.match(re))) found[k] = +m[1];
+    // the equipped artifact gives its own rate; otherwise the total rate minus the base 0.25% and Prime's 1%
+    const ea = after('equipped artifact') || after('artifact');
+    if (ea && (m = ea.match(/\+([\d.]+)%/))) found.artifact = parseFloat(m[1]);
+    else { const ir = after('interest rate'); if (ir && (m = ir.match(/([\d.]+)%/))) found.artifact = Math.max(0, Math.round((parseFloat(m[1]) - (prime ? 1.25 : 0.25)) * 100) / 100); }
+    // no Income Bonus line means 1x (the bot leaves it out without shards)
+    const ib = after('income bonus');
+    botIB = ib && (m = ib.match(/([\d.]+)x/)) ? parseFloat(m[1]) : /— Stats/.test(text) ? 1 : null;
     return found;
   }
 
