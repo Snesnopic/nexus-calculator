@@ -893,7 +893,7 @@
 
   const api = {
     F, HOLD, NEG, LN10, defaults, bonusAt, storageAt, storageOf, claimFactor, activeHours, bankCostTable, lAdd, lSub, lIB, lRate, lPm, lPAff, lCostToP, lReserve,
-    lEff, lDay, lDayAt, lHeld, costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
+    lEff, lDay, lDayAt, lHeld, lKeep, costToPD, cumPR, pAffD, reserveOf, dOf, initState, settleHeld, plan, blockSum
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.NexusModel = api;

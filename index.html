@@ -183,6 +183,7 @@ tbody tr:hover td { background: var(--sunk); }
           </div>
           <p class="hint" id="roNote"></p>
           <p class="hint" id="roBankNote"></p>
+          <p class="hint" id="roPrestige"></p>
         </fieldset>
       </div>
 
@@ -240,6 +241,7 @@ tbody tr:hover td { background: var(--sunk); }
           </div>
           <p class="hint winonly">Count the games you lose too: minutes per win is your total time divided by your wins. Gun Game pays 3,470 and Leroy 1,735 times your round 25 bonus, times your Income Bonus, up to 2T per player in the game and 1T; a private server doubles them after the cap.</p>
           <p class="derived" id="runDerived"></p>
+          <p class="derived" id="gamePays"></p>
         </fieldset>
       </div>
 
@@ -485,7 +487,7 @@ tbody tr:hover td { background: var(--sunk); }
     if (!isFinite(l)) return 'off the scale';
     if (l >= Math.log(1e36)) return sciL(l);
     const x = Math.exp(l);
-    for (const [v, u] of UNITS) if (x >= v) return NF(x / v >= 100 ? 0 : 2).format(x / v) + ' ' + u;
+    for (const [v, u] of UNITS) if (x >= v * (1 - 1e-9)) return NF(x / v >= 100 ? 0 : 2).format(x / v) + ' ' + u;
     return NF(0).format(x);
   }
   function fmtIBL(l) {
@@ -724,6 +726,24 @@ tbody tr:hover td { background: var(--sunk); }
     $('roPM').textContent = fmtInt((cfg.P + 1) * cfg.R) + 'x';
     M.settleHeld(cfg, st);
     $('roDay').textContent = fmtL(M.lDay(cfg, st));
+    // the most prestige at R100 the points buy while the bank keeps what full interest needs
+    const d = 1 - 0.05 * cfg.disc, keep = Math.exp(M.lKeep(cfg, st));
+    const W = M.cumPR(cfg.P, cfg.R, d) + cfg.bal, Q = M.pAffD(Math.max(0, W - keep), d);
+    const rp = $('roPrestige'); rp.textContent = '';
+    const keepTxt = keep > 0 ? `, keeping ${fmtL(Math.log(keep))} in the bank for full interest` : '';
+    if (Q >= 1 && (Q - 1 > cfg.P || cfg.R < 100)) {
+      rp.append('Next full prestige: ', cmd('/prestigeupto ' + (Q - 1)), ' and ', cmd('/rankupmax'), ` → P${fmtInt(Q - 1)} R100, Income ${fmtInt(100 * Q)}x${keepTxt}.`);
+    } else if (Q >= 1) {
+      rp.append(`You already hold the most prestige your points buy at R100${keepTxt}. P${fmtInt(cfg.P + 1)} R100 needs ${fmtL(Math.log(M.cumPR(cfg.P + 1, 100, d) - W + keep))} more.`);
+    } else rp.append(`P0 R100 (Income 100x) needs ${fmtL(Math.log(M.cumPR(0, 100, d) - W + keep))} more; until then, /rankupmax.`);
+    // what a Gun Game or Leroy win pays with that prestige (or what is held, if more)
+    const inc = Math.max((cfg.P + 1) * cfg.R, 100 * Q), r25 = 1500 * Math.pow(1.4, 4), mul = cfg.privateServer ? 2 : 1;
+    const lgg = Math.log(3470 * r25 * inc) + lib, lle = Math.log(1735 * r25 * inc) + lib;
+    const pay = (l, cap) => Math.log(mul) + Math.min(l, Math.log(cap));
+    const gp = $('gamePays'); gp.textContent = '';
+    gp.append(`With Income ${fmtInt(inc)}x and Income Bonus ${fmtIBL(lib)}: a Gun Game win pays `, el('b', null, fmtL(pay(lgg, 2e12))), ' per player in the game',
+      lgg < Math.log(2e12) ? ` (the 2T cap needs Income × Income Bonus ${fmtInt(Math.ceil(2e12 / (3470 * r25)))}, you have ${fmtInt(Math.round(Math.exp(lgg) / (3470 * r25)))})` : ' (the cap)',
+      ', beating Leroy pays ', el('b', null, fmtL(pay(lle, 1e12))), lle < Math.log(1e12) ? '' : ' (the cap)', cfg.privateServer ? ', doubled on your private server.' : '. A private server doubles both.');
     // a game at the best stop round, paid on the Income the points held buy now
     const rd = $('runDerived'); rd.textContent = '';
     if (cfg.run) {
@@ -747,7 +767,8 @@ tbody tr:hover td { background: var(--sunk); }
     $('roRes').textContent = fmtL(lRes);
     const bn = $('roBankNote'); bn.textContent = '';
     const lBal = lnOf(cfg.bal);
-    bn.append(lBal >= lRes ? `Your bank already reaches the hourly cap: keep at least ${fmtL(lRes)} in it when you /claiminterest.`
+    if (M.lKeep(cfg, st) === NEG) bn.append(`The hourly cap needs ${fmtL(lRes)} in the bank at your rate and Income Bonus; below it the bank pays only that share, so for now your points do more as prestige.`);
+    else bn.append(lBal >= lRes ? `Your bank already reaches the hourly cap: keep at least ${fmtL(lRes)} in it when you /claiminterest.`
       : `To be paid the full ${fmtL(Math.log(cfg.rawCap))} for every stored hour, have ${fmtL(lRes)} in the bank when you /claiminterest: borrow ${fmtL(M.lSub(lRes, lBal))} more and pay it back right after.`);
     $('bankDerived').textContent = '';
     $('bankDerived').append('Bank bonus ', el('b', null, '+' + NF(0).format((cfg.bankBonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(cfg.rate * 100) + '%/hr'), ' (as in /bank: base and Prime are added to the artifact)',
