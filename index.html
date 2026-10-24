@@ -267,7 +267,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
             <div class="fields three">
               <div class="f"><label for="rP">Prestige</label><input class="num" id="rP" type="number" min="0" step="1"></div>
               <div class="f"><label for="rR">Rank (1–100)</label><input class="num" id="rR" type="number" min="1" max="100" step="1"></div>
-              <div class="f"><label for="rIB">Income Bonus</label><input class="num" id="rIB" type="number" min="0" step="0.05"></div>
+              <div class="f"><label for="rIB">Income Bonus (Gun Game, Leroy)</label><input class="num" id="rIB" type="number" min="0" step="0.05"></div>
             </div>
             <label class="check"><input id="rReinvest" type="checkbox"> Buy prestige after every block (if the game applies it right away)</label>
             <p class="derived" id="rDerived"></p>
@@ -276,7 +276,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
         <div class="kpis" id="rKpis"></div>
         <section class="panel">
           <h2>Reward per round</h2>
-          <p class="hint">Points arrive every 5 rounds from round 10: 1500 × Income × Income Bonus × 1.4^(round/5 − 1), doubled on private servers. Each block is worth 1.4 times the previous one, so a game pays about 3.5 times its last block.</p>
+          <p class="hint">Points arrive every 5 rounds from round 10: 1500 × Income × 1.4^(round/5 − 1), doubled on private servers; the Income Bonus does not count (round 55 at Income 756 and 3x paid 32.8M). Each block is worth 1.4 times the previous one, so a game pays about 3.5 times its last block.</p>
           <div class="tablebox tall"><table id="roundTable"></table></div>
         </section>
         <section class="panel">
@@ -294,7 +294,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
             <li><b>Income</b> = (prestige + 1) × rank.</li>
             <li><b>Bank</b>: an hour of interest is min(balance × interest rate, 100B), times the bank bonus; it piles up for as many hours as the storage holds (see <code>/bank</code>: 12 h at Lv15 since the wipe). Interest rate = 0.25%/hr base + 1% with Prime + the equipped artifact. The balance that reaches the cap is 100B ÷ interest rate; stored hours are paid at the balance you hold when you <code>/claiminterest</code>.</li>
             <li><b>Income Bonus</b> (since the 24 Oct wipe): only for points earned in game, 1 + Prime 0.25 + server boost 0.25 + leaderboard, Gun Game and map record bonuses, capped at 3x.</li>
-            <li><b>Zombies rounds</b>: every 5 rounds from round 10 pay 1500 × Income × Income Bonus × 1.4^(round/5 − 1), doubled on private servers.</li>
+            <li><b>Zombies rounds</b>: every 5 rounds from round 10 pay 1500 × Income × 1.4^(round/5 − 1), doubled on private servers, without the Income Bonus.</li>
           </ul>
         </details>
       </section>
@@ -585,7 +585,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     let held = cumPR(P, R), inc = (P + 1) * R, tot = 0;
     const rows = [];
     for (let r = 10; r <= 255; r += 5) {
-      const rew = 1500 * inc * ib * Math.pow(1.4, r / 5 - 1) * mult;
+      const rew = 1500 * inc * Math.pow(1.4, r / 5 - 1) * mult;
       tot += rew;
       rows.push({ r: r, inc: inc, rew: rew, tot: tot });
       if (reinvest) { held += rew; const q = qAff(held); inc = Math.max(inc, 100 * q); }
