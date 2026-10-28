@@ -170,7 +170,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
             <div class="f"><label for="P">Prestige</label><input class="num" id="P" type="number" min="0" step="1"></div>
             <div class="f"><label for="R">Rank (1–100)</label><input class="num" id="R" type="number" min="1" max="100" step="1"></div>
             <div class="f"><label for="bal">Bank balance</label><input class="num" id="bal" type="text" inputmode="decimal" placeholder="e.g. 1.5T"></div>
-            <div class="f"><label for="ib">Income Bonus (in game)</label><input class="num" id="ib" type="number" min="1" max="3" step="0.05"></div>
+            <div class="f"><label for="ib">Income Bonus (in game)</label><input class="num" id="ib" type="number" min="1" max="5" step="0.05"></div>
           </div>
           <div class="checks">
             <label class="check"><input id="prime" type="checkbox"> Prime</label>
@@ -293,7 +293,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
             <li><b>Ranks and prestige</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 + P/100) (the last factor, +1% per prestige, is new since the wipe). A full prestige (rank 1 to 100) costs 82,087,500 × (P+1) × (1 + P/100), and the prestige step from rank 100 is free, so P at rank 100 costs exactly as much as P+1 at rank 1 and pays 100 times the Income.</li>
             <li><b>Income</b> = (prestige + 1) × rank.</li>
             <li><b>Bank</b>: an hour of interest is min(balance × interest rate, 100B), times the bank bonus; it piles up for as many hours as the storage holds (see <code>/bank</code>: 12 h at Lv15 since the wipe). Interest rate = 0.25%/hr base + 1% with Prime + the equipped artifact. The balance that reaches the cap is 100B ÷ interest rate; stored hours are paid at the balance you hold when you <code>/claiminterest</code>.</li>
-            <li><b>Income Bonus</b> (since the 24 Oct wipe): only for points earned in game, 1 + Prime 0.25 + server boost 0.25 + leaderboard, Gun Game and map record bonuses, capped at 3x.</li>
+            <li><b>Income Bonus</b> (26 Oct): only for points earned in game, 1 + Prime 0.25 + server boost 0.25 + 0.2 per all-time map record and 0.1 per monthly record (every team size) + Gun Game wins top 5 (1.0, 0.6, 0.4, 0.2, 0.1) + Prestige top 3 and casino Most Won top 3 (0.5, 0.3, 0.1), capped at 5x.</li>
             <li><b>Zombies rounds</b>: every 5 rounds from round 10 pay 1500 × Income × 1.4^(round/5 − 1), doubled on private servers, without the Income Bonus.</li>
           </ul>
         </details>
