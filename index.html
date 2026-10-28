@@ -290,7 +290,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
         <details>
           <summary>Formulas</summary>
           <ul>
-            <li><b>Ranks and prestige</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1). A full prestige (rank 1 to 100) costs 82,087,500 × (P+1), and the prestige step from rank 100 is free, so P at rank 100 costs exactly as much as P+1 at rank 1 and pays 100 times the Income.</li>
+            <li><b>Ranks and prestige</b>: rank r → r+1 at prestige P costs 750 × r² × (P+1) (three times the pre-wipe price). A full prestige (rank 1 to 100) costs 246,262,500 × (P+1), and the prestige step from rank 100 is free, so P at rank 100 costs exactly as much as P+1 at rank 1 and pays 100 times the Income.</li>
             <li><b>Income</b> = (prestige + 1) × rank.</li>
             <li><b>Bank</b>: an hour of interest is min(balance × interest rate, 100B), times the bank bonus; it piles up for as many hours as the storage holds (see <code>/bank</code>: 12 h at Lv15 since the wipe). Interest rate = 0.25%/hr base + 1% with Prime + the equipped artifact. The balance that reaches the cap is 100B ÷ interest rate; stored hours are paid at the balance you hold when you <code>/claiminterest</code>.</li>
             <li><b>Income Bonus</b> (since the 24 Oct wipe): only for points earned in game, 1 + Prime 0.25 + server boost 0.25 + leaderboard, Gun Game and map record bonuses, capped at 3x.</li>
@@ -307,7 +307,8 @@ tr.cur td { background: var(--tint); font-weight: 600; }
   'use strict';
   const $ = id => document.getElementById(id);
   const KEY = 'nexus-calculator-v3';
-  const F = 82087500;               // a full prestige at P0; rank r -> r+1 costs 250 r^2 (P+1)
+  const RANK = 750;                 // rank r -> r+1 costs RANK r^2 (P+1) (250 before the wipe)
+  const F = 246262500;              // a full prestige at P0 = RANK × sumSq(99)
   const RAW_CAP = 1e11;             // hourly interest cap before the bank bonus
   const NUM_IDS = ['P', 'R', 'ib', 'artifact', 'storage', 'target', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'custom', 'spendMode', 'bankLv', 'paste'];
@@ -352,7 +353,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
   // ---- prestige math ----
   const sumSq = n => (n <= 0 ? 0 : n * (n + 1) * (2 * n + 1) / 6);
   // points spent so far on prestige P rank R
-  const cumPR = (P, R) => F * P * (P + 1) / 2 + (P + 1) * 250 * sumSq(R - 1);
+  const cumPR = (P, R) => F * P * (P + 1) / 2 + (P + 1) * RANK * sumSq(R - 1);
   // highest Q with a full prestige to Q affordable from total value V (P(Q-1) R100 costs the same as Q R1)
   function qAff(V) {
     if (!(V > 0)) return 0;
