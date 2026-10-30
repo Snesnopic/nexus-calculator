@@ -192,7 +192,6 @@ tr.cur td { background: var(--tint); font-weight: 600; }
           <div class="fields">
             <div class="f"><label for="bankLv">Bank level</label><select class="num" id="bankLv"></select></div>
             <div class="f"><label for="artifact">Artifact interest (%/hr)</label><input class="num" id="artifact" type="number" min="0" step="0.25"></div>
-            <div class="f"><label for="storage">Storage (h, from /bank)</label><input class="num" id="storage" type="number" min="1" step="1"></div>
           </div>
           <p class="derived" id="bankDerived"></p>
         </fieldset>
@@ -254,7 +253,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
         </section>
         <section class="panel">
           <h2>Bank levels</h2>
-          <p class="hint">Upgrades cost points and artifacts. Each level adds 5% to the bank bonus (Lv20 +10%).</p>
+          <p class="hint">Cost and artifacts to reach each level. Each level adds 5% to the bank bonus (Lv20 +10%) and 2 h of storage, up to 12 h.</p>
           <div class="tablebox"><table id="bTable"></table></div>
         </section>
       </section>
@@ -292,7 +291,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
           <ul>
             <li><b>Ranks and prestige</b>: rank r → r+1 at prestige P costs 250 × r² × (P+1) × (1 + P/100) (the last factor, +1% per prestige, is new since the wipe). A full prestige (rank 1 to 100) costs 82,087,500 × (P+1) × (1 + P/100), and the prestige step from rank 100 is free, so P at rank 100 costs exactly as much as P+1 at rank 1 and pays 100 times the Income.</li>
             <li><b>Income</b> = (prestige + 1) × rank.</li>
-            <li><b>Bank</b>: an hour of interest is min(balance × interest rate, 100B), times the bank bonus; it piles up for as many hours as the storage holds (see <code>/bank</code>: 12 h at Lv15 since the wipe). Interest rate = 0.25%/hr base + 1% with Prime + the equipped artifact. The balance that reaches the cap is 100B ÷ interest rate; stored hours are paid at the balance you hold when you <code>/claiminterest</code>.</li>
+            <li><b>Bank</b>: an hour of interest is min(balance × interest rate, 100B), times the bank bonus; it piles up for as many hours as the storage holds (2 h per bank level, at most 12 h since the wipe). Interest rate = 0.25%/hr base + 1% with Prime + the equipped artifact. The balance that reaches the cap is 100B ÷ interest rate; stored hours are paid at the balance you hold when you <code>/claiminterest</code>.</li>
             <li><b>Income Bonus</b> (26 Oct): only for points earned in game, 1 + Prime 0.25 + server boost 0.25 + 0.2 per all-time map record and 0.1 per monthly record (every team size) + Gun Game wins top 5 (1.0, 0.6, 0.4, 0.2, 0.1) + Prestige top 3 and casino Most Won top 3 (0.5, 0.3, 0.1), capped at 5x.</li>
             <li><b>Zombies rounds</b>: every 5 rounds from round 10 pay 1500 × Income × 1.4^(round/5 − 1), doubled on private servers, without the Income Bonus.</li>
           </ul>
@@ -310,18 +309,21 @@ tr.cur td { background: var(--tint); font-weight: 600; }
   const RANK = 250;                 // rank r -> r+1 at prestige P costs RANK r^2 pm(P)
   const F = 82087500;               // RANK × sumSq(99): a full prestige at P0
   const RAW_CAP = 1e11;             // hourly interest cap before the bank bonus
-  const NUM_IDS = ['P', 'R', 'ib', 'artifact', 'storage', 'target', 'rP', 'rR', 'rIB'];
+  const NUM_IDS = ['P', 'R', 'ib', 'artifact', 'target', 'rP', 'rR', 'rIB'];
   const TXT_IDS = ['bal', 'custom', 'spendMode', 'bankLv', 'paste'];
   const CHK_IDS = ['prime', 'priv', 'rUseAcc', 'rReinvest'];
   // a fresh account until the visitor enters theirs (kept in this browser)
-  const DEFAULTS = { P: 0, R: 1, ib: 1, artifact: 0, storage: 12, target: '', rP: 0, rR: 1, rIB: 1, bal: '0', custom: '', spendMode: 'spare', bankLv: '1', paste: '',
+  const DEFAULTS = { P: 0, R: 1, ib: 1, artifact: 0, target: '', rP: 0, rR: 1, rIB: 1, bal: '0', custom: '', spendMode: 'spare', bankLv: '1', paste: '',
     prime: false, priv: false, rUseAcc: true, rReinvest: false };
-  // bank levels: cost in points and artifacts (all confirmed in game)
+  // cost in points and artifacts to reach each bank level (confirmed in game except the Lv12 artifacts)
   const BANK = {
-    12: [1.5e12, ''], 13: [5e12, '60 Epic'], 14: [15e12, '10 Legendary'], 15: [50e12, '25 Legendary'], 16: [150e12, '45 Legendary'],
+    1: [5e6, '15 Common'], 2: [15e6, '40 Common'], 3: [50e6, '60 Common'], 4: [150e6, '15 Uncommon'], 5: [500e6, '45 Uncommon'],
+    6: [1.5e9, '75 Uncommon'], 7: [5e9, '15 Rare'], 8: [15e9, '30 Rare'], 9: [50e9, '45 Rare'], 10: [150e9, '50 Rare'], 11: [500e9, '15 Epic'],
+    12: [1.5e12, '? Epic'], 13: [5e12, '60 Epic'], 14: [15e12, '10 Legendary'], 15: [50e12, '25 Legendary'], 16: [150e12, '45 Legendary'],
     17: [350e12, '15 Mythic'], 18: [750e12, '30 Mythic'], 19: [1.5e15, '25 Eternal'], 20: [3e15, '10 Nexus']
   };
   const bonusAt = L => L >= 20 ? 2 : 1 + 0.05 * (L - 1);
+  const storageAt = L => Math.min(2 * L, 12);
 
   // ---- numbers ----
   const SUF = { k: 1e3, m: 1e6, b: 1e9, t: 1e12, qa: 1e15, qi: 1e18, sx: 1e21, sp: 1e24 };
@@ -421,7 +423,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     a.bankLv = Math.min(20, Math.max(1, Math.round(num('bankLv', 1))));
     a.rate = (0.25 + (a.prime ? 1 : 0) + Math.max(0, num('artifact', 0))) / 100;
     a.bonus = bonusAt(a.bankLv);
-    a.storage = Math.max(1, num('storage', 12));
+    a.storage = storageAt(a.bankLv);
     a.reserve = RAW_CAP / a.rate;
     a.perHour = Math.min(a.bal * a.rate, RAW_CAP) * a.bonus;
     a.income = (a.P + 1) * a.R;
@@ -456,13 +458,13 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     s.append(li('Stored hours are paid at the balance you hold when you ', cmd('/claiminterest'), `: if you spent the bank, borrow ${fmt(a.reserve)} right before the claim and pay it back right after.`));
     s.append(li(`The storage holds ${a.storage} h: claim at least that often, or the hours past it are lost.`));
     const tb = $('bTable'); tb.textContent = '';
-    tb.append(el('thead', null, el('tr', null, el('th', null, 'Level'), el('th', { class: 'r' }, 'Bonus'), el('th', { class: 'r' }, 'Per hour'),
+    tb.append(el('thead', null, el('tr', null, el('th', null, 'Level'), el('th', { class: 'r' }, 'Bonus'), el('th', { class: 'r' }, 'Storage'), el('th', { class: 'r' }, 'Per hour'),
       el('th', { class: 'r' }, 'Cost'), el('th', null, 'Artifacts'))));
     const body = el('tbody');
-    for (let L = Math.max(1, Math.min(a.bankLv, 12)); L <= 20; L++) {
+    for (let L = 1; L <= 20; L++) {
       const c = BANK[L];
       body.append(el('tr', L === a.bankLv ? { class: 'cur' } : null,
-        el('td', { class: 'n' }, 'Lv' + L), el('td', { class: 'n r' }, '+' + NF(0).format((bonusAt(L) - 1) * 100) + '%'),
+        el('td', { class: 'n' }, 'Lv' + L), el('td', { class: 'n r' }, '+' + NF(0).format((bonusAt(L) - 1) * 100) + '%'), el('td', { class: 'n r' }, storageAt(L) + ' h'),
         el('td', { class: 'n r' }, fmt(RAW_CAP * bonusAt(L))), el('td', { class: 'n r' }, c ? fmt(c[0]) : '–'), el('td', null, c ? c[1] : '')));
     }
     tb.append(body);
@@ -649,9 +651,6 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     else { const ir = after('interest rate'); if (ir && (m = ir.match(/([\d.]+)%/))) found.artifact = Math.max(0, Math.round((parseFloat(m[1]) - (prime ? 1.25 : 0.25)) * 100) / 100); }
     const ib = after('income bonus'); if (ib && (m = ib.match(/([\d.]+)x/))) found.ib = parseFloat(m[1]);
     else if (/— Stats/.test(text)) found.ib = 1;
-    const st = after('storage');
-    if (st && (m = st.match(/\/\s*([\d.]+)\s*h/))) found.storage = parseFloat(m[1]);
-    else if ((m = text.match(/([\d.]+)\s*h storage/i))) found.storage = parseFloat(m[1]);
     return found;
   }
 
@@ -662,7 +661,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     const out = [
       'Nexus calculator, ' + new Date().toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
       `Account: P${v('P')} R${v('R')}, bank ${v('bal')}, Income Bonus ${v('ib')}x, Prime ${on('prime')}, private server ${on('priv')}`,
-      `Bank: level ${v('bankLv')}, artifact +${v('artifact')}%/hr, storage ${v('storage')} h`,
+      `Bank: level ${v('bankLv')}, artifact +${v('artifact')}%/hr`,
       'Now: ' + [...document.querySelectorAll('.readout div')].map(d => flat(d.children[0]) + ' ' + flat(d.children[1])).join(', '),
       '', 'Prestige:'
     ];
@@ -715,7 +714,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     const f = parseBot($('paste').value);
     const keys = Object.keys(f);
     for (const k of keys) setVal(k, f[k]);
-    const labels = { P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest', storage: 'storage', prime: 'Prime', ib: 'Income Bonus' };
+    const labels = { P: 'prestige', R: 'rank', bal: 'balance', bankLv: 'bank level', artifact: 'artifact interest', prime: 'Prime', ib: 'Income Bonus' };
     const msg = $('parseMsg');
     msg.className = 'msg ' + (keys.length ? 'ok' : 'bad');
     msg.textContent = keys.length ? 'Updated: ' + keys.map(k => labels[k] || k).join(', ') + '.' : 'Nothing recognisable found: paste the bot’s message text.';
