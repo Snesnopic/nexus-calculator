@@ -313,13 +313,13 @@ tr.cur td { background: var(--tint); font-weight: 600; }
   const TXT_IDS = ['bal', 'custom', 'spendMode', 'bankLv', 'paste'];
   const CHK_IDS = ['prime', 'priv', 'rUseAcc', 'rReinvest'];
   // a fresh account until the visitor enters theirs (kept in this browser)
-  const DEFAULTS = { P: 0, R: 1, ib: 1, artifact: 0, target: '', rP: 0, rR: 1, rIB: 1, bal: '0', custom: '', spendMode: 'spare', bankLv: '1', paste: '',
+  const DEFAULTS = { P: 0, R: 1, ib: 1, artifact: 0, target: '', rP: 0, rR: 1, rIB: 1, bal: '0', custom: '', spendMode: 'spare', bankLv: '0', paste: '',
     prime: false, priv: false, rUseAcc: true, rReinvest: false };
-  // cost in points and artifacts to reach each bank level (confirmed in game except the Lv12 artifacts)
+  // cost in points and artifacts to reach each bank level (all confirmed in game); Lv0 pays no interest
   const BANK = {
     1: [5e6, '15 Common'], 2: [15e6, '40 Common'], 3: [50e6, '60 Common'], 4: [150e6, '15 Uncommon'], 5: [500e6, '45 Uncommon'],
     6: [1.5e9, '75 Uncommon'], 7: [5e9, '15 Rare'], 8: [15e9, '30 Rare'], 9: [50e9, '45 Rare'], 10: [150e9, '50 Rare'], 11: [500e9, '15 Epic'],
-    12: [1.5e12, '? Epic'], 13: [5e12, '60 Epic'], 14: [15e12, '10 Legendary'], 15: [50e12, '25 Legendary'], 16: [150e12, '45 Legendary'],
+    12: [1.5e12, '40 Epic'], 13: [5e12, '60 Epic'], 14: [15e12, '10 Legendary'], 15: [50e12, '25 Legendary'], 16: [150e12, '45 Legendary'],
     17: [350e12, '15 Mythic'], 18: [750e12, '30 Mythic'], 19: [1.5e15, '25 Eternal'], 20: [3e15, '10 Nexus']
   };
   const bonusAt = L => L >= 20 ? 2 : 1 + 0.05 * (L - 1);
@@ -389,7 +389,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
   const num = (id, d) => { const x = parseFloat($(id).value); return isFinite(x) ? x : d; };
 
   // ---- inputs and storage ----
-  for (let L = 1; L <= 20; L++) $('bankLv').append(new Option(String(L), String(L)));
+  for (let L = 0; L <= 20; L++) $('bankLv').append(new Option(String(L), String(L)));
   function setVal(id, v) { const e = $(id); if (CHK_IDS.includes(id)) e.checked = !!v; else e.value = v; }
   function getVals() {
     const o = {};
@@ -420,11 +420,11 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     a.ib = Math.max(1, num('ib', 1));
     a.prime = $('prime').checked;
     a.priv = $('priv').checked;
-    a.bankLv = Math.min(20, Math.max(1, Math.round(num('bankLv', 1))));
+    a.bankLv = Math.min(20, Math.max(0, Math.round(num('bankLv', 0))));
     a.rate = (0.25 + (a.prime ? 1 : 0) + Math.max(0, num('artifact', 0))) / 100;
-    a.bonus = bonusAt(a.bankLv);
+    a.bonus = a.bankLv ? bonusAt(a.bankLv) : 0;
     a.storage = storageAt(a.bankLv);
-    a.reserve = RAW_CAP / a.rate;
+    a.reserve = a.bankLv ? RAW_CAP / a.rate : 0;
     a.perHour = Math.min(a.bal * a.rate, RAW_CAP) * a.bonus;
     a.income = (a.P + 1) * a.R;
     a.held = cumPR(a.P, a.R);
@@ -441,22 +441,35 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     if (a.bal < a.reserve) note.append(`Your bank is ${fmt(a.reserve - a.bal)} short of full interest: it earns ${NF(0).format(a.bal * a.rate / RAW_CAP * 100)}% of the cap.`);
     else if (a.R < 100) note.append(`At rank 100 your Income would be ${fmtInt((a.P + 1) * 100)}x.`);
     $('bankDerived').textContent = '';
+    if (!a.bankLv) { $('bankDerived').append('Lv0: the bank pays no interest. Lv1 costs ', el('b', null, fmt(BANK[1][0]) + ' + ' + BANK[1][1]), '.'); return; }
     $('bankDerived').append('Bonus ', el('b', null, '+' + NF(0).format((a.bonus - 1) * 100) + '%'), ' · interest ', el('b', null, NF(2).format(a.rate * 100) + '%/hr'),
       ' (0.25% base + 1% Prime + artifact) · storage ', el('b', null, a.storage + ' h'), ' · at most ', el('b', null, fmt(RAW_CAP * a.bonus) + '/hr'));
   }
 
   function renderBank(a) {
     const k = $('bKpis'); k.textContent = '';
+    const s = $('bSteps'); s.textContent = '';
+    if (!a.bankLv) {
+      k.append(kpi('Bank per hour', '0', 'Lv0 pays no interest'));
+      k.append(kpi('Upgrade to Lv1', fmt(BANK[1][0]), '+ ' + BANK[1][1]));
+      s.append(li(`At Lv0 the bank pays nothing: upgrade it to Lv1 (${fmt(BANK[1][0])} + ${BANK[1][1]}) to start earning interest.`));
+    } else renderBankLevel(a, k, s);
+    renderBankTable(a);
+  }
+
+  function renderBankLevel(a, k, s) {
     const full = a.bal >= a.reserve;
     k.append(kpi('Full interest from', fmt(a.reserve), `100B ÷ ${NF(2).format(a.rate * 100)}%`));
     k.append(kpi(full ? 'You can spend' : 'Short of full interest', fmt(Math.abs(a.bal - a.reserve)), full ? 'and still earn the cap' : `earning ${NF(0).format(a.bal * a.rate / RAW_CAP * 100)}% of it`));
     k.append(kpi('Bank per hour', fmt(a.perHour), 'up to ' + fmt(RAW_CAP * a.bonus)));
     k.append(kpi('Bank per day', fmt(a.perHour * 24), `if you claim at least every ${a.storage} h`));
-    const s = $('bSteps'); s.textContent = '';
     if (full) s.append(li(`Spend up to ${fmt(a.bal - a.reserve)} on ranks and prestige: the ${fmt(a.reserve)} left still earn the full ${fmt(RAW_CAP * a.bonus)} an hour.`));
     else s.append(li(`Add ${fmt(a.reserve - a.bal)} to the bank to earn the full ${fmt(RAW_CAP * a.bonus)} an hour; until then a bigger balance earns more.`));
     s.append(li('Stored hours are paid at the balance you hold when you ', cmd('/claiminterest'), `: if you spent the bank, borrow ${fmt(a.reserve)} right before the claim and pay it back right after.`));
     s.append(li(`The storage holds ${a.storage} h: claim at least that often, or the hours past it are lost.`));
+  }
+
+  function renderBankTable(a) {
     const tb = $('bTable'); tb.textContent = '';
     tb.append(el('thead', null, el('tr', null, el('th', null, 'Level'), el('th', { class: 'r' }, 'Bonus'), el('th', { class: 'r' }, 'Storage'), el('th', { class: 'r' }, 'Per hour'),
       el('th', { class: 'r' }, 'Cost'), el('th', null, 'Artifacts'))));
@@ -486,7 +499,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     const reachP = canFull ? fullP : a.P, reachR = canFull ? 100 : rAff(a.P, V);
     const tgt = Math.round(num('target', NaN));
     const k = $('pKpis'); k.textContent = '';
-    k.append(kpi('You can spend', fmt(W), $('spendMode').value === 'spare' ? `keeping ${fmt(a.reserve)} in the bank` : ''));
+    k.append(kpi('You can spend', fmt(W), $('spendMode').value === 'spare' ? (a.bankLv ? `keeping ${fmt(a.reserve)} in the bank` : 'the bank pays no interest at Lv0') : ''));
     k.append(kpi('You reach', `P${fmtInt(reachP)} R${reachR}`, `Income ${fmtInt((reachP + 1) * reachR)}x (now ${fmtInt(a.income)}x)`));
     // the next prestige at R100 beyond what is affordable (P x R100 costs cumP(x+1))
     const nextQ = Math.max(Q, a.P + (a.R >= 100 ? 1 : 0)) + 1;
@@ -496,7 +509,7 @@ tr.cur td { background: var(--tint); font-weight: 600; }
     if (canFull) s.append(li(cmd('/prestigeupto ' + fullP), ' then ', cmd('/rankupmax'), ` → P${fmtInt(fullP)} R100 for ${fmt(cumPR(fullP, 100) - a.held)}.`));
     else if (reachR > a.R) s.append(li(cmd('/rankupmax'), ` → P${fmtInt(a.P)} R${reachR} for ${fmt(cumPR(a.P, reachR) - a.held)}.`));
     else s.append(li('Nothing to buy yet: the next rank needs ', fmt(cumPR(a.P, Math.min(100, a.R + 1)) - V), ' more.'));
-    s.append(li('Buy right before you claim a reward or start a game: they pay on the Income you hold then. Points kept in the bank above ', fmt(a.reserve), ' earn nothing more.'));
+    s.append(li('Buy right before you claim a reward or start a game: they pay on the Income you hold then. ', a.bankLv ? `Points kept in the bank above ${fmt(a.reserve)} earn nothing more.` : 'At bank Lv0 points in the bank earn nothing.'));
     renderPChart(a, V, reachP, isFinite(tgt) ? tgt : null);
     // milestones from here
     const tb = $('pTable'); tb.textContent = '';
